@@ -421,8 +421,8 @@ if ( ! function_exists( 'sacd_protect_content' ) ) {
     if ($sacd_2fa !== 'yes'){
 			
 			
-			wp_redirect($fallback_url );
-            exit;
+			//wp_redirect($fallback_url );
+            //exit;
 	}
 	
 	if(! $email && $sacd_2fa == 'yes'){
