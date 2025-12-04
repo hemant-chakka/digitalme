@@ -1,0 +1,70 @@
+/* WPRankLab admin styles placeholder */
+.wpranklab-license-notice { border-left: 4px solid #dc3232; }
+
+
+/* WPRankLab AI Visibility metabox */
+.wpranklab-meta-box {
+    font-size: 13px;
+}
+
+.wpranklab-score-badge {
+    display: inline-block;
+    padding: 6px 10px;
+    border-radius: 20px;
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.wpranklab-score-green {
+    background: #46b450;
+    color: #fff;
+}
+
+.wpranklab-score-orange {
+    background: #ffb900;
+    color: #23282d;
+}
+
+.wpranklab-score-red {
+    background: #dc3232;
+    color: #fff;
+}
+
+.wpranklab-score-neutral {
+    background: #ccd0d4;
+    color: #23282d;
+}
+
+.wpranklab-score-label {
+    margin: 4px 0 6px;
+}
+
+.wpranklab-last-run {
+    margin: 0 0 6px;
+    color: #666;
+}
+
+.wpranklab-metrics summary {
+    cursor: pointer;
+}
+
+.wpranklab-metrics ul {
+    margin: 4px 0 0 16px;
+    padding: 0;
+    list-style: disc;
+}
+
+.wpranklab-upgrade-hint {
+    margin-top: 8px;
+    border-top: 1px solid #eee;
+    padding-top: 8px;
+}
+
+
+.wpranklab-scan-message {
+    margin: 0 0 6px;
+    padding: 4px 6px;
+    background: #e7f7e7;
+    border-left: 3px solid #46b450;
+    font-size: 12px;
+}

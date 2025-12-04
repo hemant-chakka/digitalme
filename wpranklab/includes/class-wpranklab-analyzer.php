@@ -1,0 +1,262 @@
+<?php
+if ( ! defined( 'ABSPATH' ) ) {
+    exit;
+}
+
+/**
+ * Computes a simple AI Visibility score and stores metrics per post.
+ */
+class WPRankLab_Analyzer {
+
+    /**
+     * Singleton instance.
+     *
+     * @var WPRankLab_Analyzer|null
+     */
+    protected static $instance = null;
+
+    /**
+     * Get singleton instance.
+     *
+     * @return WPRankLab_Analyzer
+     */
+    public static function get_instance() {
+        if ( null === self::$instance ) {
+            self::$instance = new self();
+        }
+
+        return self::$instance;
+    }
+
+    /**
+     * Handle save_post to auto-analyze supported post types.
+     *
+     * @param int     $post_id
+     * @param WP_Post $post
+     */
+    public function handle_save_post( $post_id, $post ) {
+        // Skip autosaves and revisions.
+        if ( wp_is_post_autosave( $post_id ) || wp_is_post_revision( $post_id ) ) {
+            return;
+        }
+
+        // Only analyze certain post types (filterable).
+        $allowed_types = apply_filters(
+            'wpranklab_analyzer_post_types',
+            array( 'post', 'page' )
+        );
+
+        if ( ! in_array( $post->post_type, $allowed_types, true ) ) {
+            return;
+        }
+
+        if ( in_array( $post->post_status, array( 'auto-draft', 'trash' ), true ) ) {
+            return;
+        }
+
+        $this->analyze_post( $post_id );
+    }
+
+    /**
+     * Analyze a post and store AI visibility metrics.
+     *
+     * @param int $post_id
+     *
+     * @return array|null
+     */
+    public function analyze_post( $post_id ) {
+        $post = get_post( $post_id );
+        if ( ! $post ) {
+            return null;
+        }
+
+        $content = (string) $post->post_content;
+        $title   = (string) $post->post_title;
+
+        $metrics = array();
+
+        // Combined plain text for some metrics.
+        $text = wp_strip_all_tags( $title . ' ' . $content );
+
+        // Word count.
+        $words      = preg_split( '/\s+/', trim( $text ) );
+        $word_count = ( ! empty( $words ) && '' !== $words[0] ) ? count( $words ) : 0;
+        $metrics['word_count'] = $word_count;
+
+        // Headings count (H2 / H3).
+        $metrics['h2_count'] = preg_match_all( '/<h2\b[^>]*>/i', $content, $dummy1 );
+        $metrics['h3_count'] = preg_match_all( '/<h3\b[^>]*>/i', $content, $dummy2 );
+
+        // Internal links.
+        $metrics['internal_links'] = $this->count_internal_links( $content );
+
+        // Q&A / FAQ signals.
+        $metrics['question_marks']    = substr_count( $content, '?' );
+        $metrics['has_faq_keyword']   = (int) ( false !== stripos( $content, 'FAQ' ) || false !== stripos( $content, 'Frequently Asked Questions' ) );
+
+        // Rough readability proxy.
+        $metrics['avg_sentence_length'] = $this->estimate_avg_sentence_length( $text );
+
+        // Compute score 0–100.
+        $score            = $this->compute_score( $metrics );
+        $metrics['score'] = $score;
+
+        update_post_meta( $post_id, '_wpranklab_visibility_score', $score );
+        update_post_meta( $post_id, '_wpranklab_visibility_last_run', current_time( 'mysql' ) );
+        update_post_meta( $post_id, '_wpranklab_visibility_data', $metrics );
+
+        /**
+         * Fires after a post has been analyzed by WPRankLab.
+         *
+         * @param int   $post_id
+         * @param array $metrics
+         */
+        do_action( 'wpranklab_after_analyze_post', $post_id, $metrics );
+
+        return $metrics;
+    }
+
+    /**
+     * Count internal links in HTML content.
+     *
+     * @param string $content
+     *
+     * @return int
+     */
+    protected function count_internal_links( $content ) {
+        $count = 0;
+
+        if ( empty( $content ) ) {
+            return 0;
+        }
+
+        $home = home_url();
+        $host = wp_parse_url( $home, PHP_URL_HOST );
+
+        if ( preg_match_all( '/<a\b[^>]*href=["\']([^"\']+)["\'][^>]*>/i', $content, $matches ) ) {
+            foreach ( $matches[1] as $href ) {
+                $href = trim( $href );
+                if ( '' === $href ) {
+                    continue;
+                }
+
+                // Relative URLs count as internal.
+                if ( 0 === strpos( $href, '/' ) ) {
+                    $count++;
+                    continue;
+                }
+
+                $h = wp_parse_url( $href, PHP_URL_HOST );
+                if ( $h && $host && strtolower( $h ) === strtolower( $host ) ) {
+                    $count++;
+                }
+            }
+        }
+
+        return $count;
+    }
+
+    /**
+     * Estimate average sentence length as a rough readability proxy.
+     *
+     * @param string $text
+     *
+     * @return float
+     */
+    protected function estimate_avg_sentence_length( $text ) {
+        $text = trim( $text );
+        if ( '' === $text ) {
+            return 0;
+        }
+
+        // Split by ., !, ? boundaries.
+        $parts     = preg_split( '/[.!?]+/', $text );
+        $sentences = array_filter( array_map( 'trim', (array) $parts ) );
+
+        if ( empty( $sentences ) ) {
+            return 0;
+        }
+
+        $wc               = str_word_count( $text );
+        $sentence_count   = count( $sentences );
+        if ( 0 === $sentence_count ) {
+            return 0;
+        }
+
+        return $wc / $sentence_count;
+    }
+
+    /**
+     * Compute a simple heuristic score from metrics.
+     *
+     * @param array $m
+     *
+     * @return int
+     */
+    protected function compute_score( $m ) {
+        $score = 0;
+
+        // 1) Word count (content depth).
+        $wc = isset( $m['word_count'] ) ? (int) $m['word_count'] : 0;
+        if ( $wc >= 300 ) {
+            $score += 30;
+        } elseif ( $wc >= 150 ) {
+            $score += 20;
+        } elseif ( $wc >= 80 ) {
+            $score += 10;
+        }
+
+        // 2) Headings (structure).
+        $headings = (int) ( $m['h2_count'] ?? 0 ) + (int) ( $m['h3_count'] ?? 0 );
+        if ( $headings >= 4 ) {
+            $score += 20;
+        } elseif ( $headings >= 2 ) {
+            $score += 12;
+        } elseif ( $headings >= 1 ) {
+            $score += 6;
+        }
+
+        // 3) Internal links (context & crawlability).
+        $internal = (int) ( $m['internal_links'] ?? 0 );
+        if ( $internal >= 8 ) {
+            $score += 20;
+        } elseif ( $internal >= 4 ) {
+            $score += 12;
+        } elseif ( $internal >= 2 ) {
+            $score += 6;
+        }
+
+        // 4) Q&A / FAQ signals.
+        $questions = (int) ( $m['question_marks'] ?? 0 );
+        $has_faq   = ! empty( $m['has_faq_keyword'] );
+        if ( $questions >= 3 || $has_faq ) {
+            $score += 15;
+        } elseif ( $questions >= 1 ) {
+            $score += 8;
+        }
+
+        // 5) Readability via avg sentence length (Goldilocks zone).
+        $asl = (float) ( $m['avg_sentence_length'] ?? 0 );
+        if ( $asl > 0 ) {
+            if ( $asl >= 12 && $asl <= 25 ) {
+                $score += 15;
+            } elseif ( $asl >= 8 && $asl <= 30 ) {
+                $score += 8;
+            }
+        }
+
+        if ( $score > 100 ) {
+            $score = 100;
+        }
+
+        /**
+         * Filter the final visibility score.
+         *
+         * @param int   $score
+         * @param array $m
+         */
+        $score = (int) apply_filters( 'wpranklab_visibility_score', $score, $m );
+
+        return max( 0, min( 100, $score ) );
+    }
+}
