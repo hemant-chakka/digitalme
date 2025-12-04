@@ -3,7 +3,7 @@
  * Plugin Name:       WPRankLab
  * Plugin URI:        https://wpranklab.com/
  * Description:       Optimize your website for AI search engines.
- * Version:           0.3.3
+ * Version:           0.4.0
  * Author:            DigitalMe
  * Author URI:        https://digitalme.me/
  * Text Domain:       wpranklab
@@ -14,11 +14,13 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit; // Exit if accessed directly.
 }
 
-define( 'WPRANKLAB_VERSION', '0.3.3' );
+define( 'WPRANKLAB_VERSION', '0.4.0' );
 define( 'WPRANKLAB_PLUGIN_FILE', __FILE__ );
 define( 'WPRANKLAB_PLUGIN_BASENAME', plugin_basename( __FILE__ ) );
 define( 'WPRANKLAB_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'WPRANKLAB_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
+
+require_once WPRANKLAB_PLUGIN_DIR . 'includes/class-wpranklab-ai.php';
 
 require_once WPRANKLAB_PLUGIN_DIR . 'includes/class-wpranklab-history.php';
 

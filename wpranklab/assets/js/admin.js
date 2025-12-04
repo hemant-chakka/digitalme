@@ -25,3 +25,25 @@
         wasSaving = isSaving;
     });
 })(window.wp);
+
+
+(function () {
+    document.addEventListener('click', function (e) {
+        var btn = e.target.closest('.wpranklab-copy-btn');
+        if (!btn) return;
+
+        var targetId = btn.getAttribute('data-wpranklab-copy-target');
+        if (!targetId) return;
+
+        var el = document.getElementById(targetId);
+        if (!el) return;
+
+        var text = el.innerText || el.textContent || '';
+        navigator.clipboard.writeText(text).then(function () {
+            btn.innerText = 'Copied!';
+            setTimeout(function () {
+                btn.innerText = 'Copy';
+            }, 1500);
+        });
+    });
+})();

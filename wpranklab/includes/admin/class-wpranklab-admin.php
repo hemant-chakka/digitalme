@@ -45,6 +45,13 @@ class WPRankLab_Admin {
 
         // Global scan for all content.
         add_action( 'admin_post_wpranklab_scan_all', array( $this, 'handle_scan_all' ) );
+
+		        // AI generation: summary + Q&A.
+        add_action( 'admin_post_wpranklab_generate_summary', array( $this, 'handle_generate_summary' ) );
+        add_action( 'admin_post_wpranklab_generate_qa', array( $this, 'handle_generate_qa' ) );
+        add_action( 'admin_post_wpranklab_insert_summary', array( $this, 'handle_insert_summary' ) );
+        add_action( 'admin_post_wpranklab_insert_qa', array( $this, 'handle_insert_qa' ) );
+
     }
 
     /**
@@ -549,7 +556,7 @@ class WPRankLab_Admin {
         }
     }
 
-    /**
+        /**
      * Render AI Visibility metabox in the post editor.
      *
      * @param WP_Post $post
@@ -581,11 +588,42 @@ class WPRankLab_Admin {
         }
 
         $scan_done = isset( $_GET['wpranklab_scan'] ) && '1' === $_GET['wpranklab_scan'];
+
+        // AI-generated content.
+        $ai_summary = get_post_meta( $post->ID, '_wpranklab_ai_summary', true );
+        $ai_qa      = get_post_meta( $post->ID, '_wpranklab_ai_qa_block', true );
+
+        $is_pro   = function_exists( 'wpranklab_is_pro_active' ) && wpranklab_is_pro_active();
+        $settings = get_option( WPRANKLAB_OPTION_SETTINGS, array() );
+        $has_key  = ! empty( $settings['openai_api_key'] );
+
+        // Messages from actions.
+        $ai_msg = '';
+        if ( isset( $_GET['wpranklab_ai'] ) ) {
+            $code = sanitize_text_field( wp_unslash( $_GET['wpranklab_ai'] ) );
+            if ( 'summary_ok' === $code ) {
+                $ai_msg = __( 'AI summary generated successfully.', 'wpranklab' );
+            } elseif ( 'summary_err' === $code ) {
+                $ai_msg = __( 'Could not generate AI summary. Please try again.', 'wpranklab' );
+            } elseif ( 'qa_ok' === $code ) {
+                $ai_msg = __( 'AI Q&A block generated successfully.', 'wpranklab' );
+            } elseif ( 'qa_err' === $code ) {
+                $ai_msg = __( 'Could not generate AI Q&A block. Please try again.', 'wpranklab' );
+            } elseif ( 'insert_ok' === $code ) {
+                $ai_msg = __( 'AI content was inserted into the post.', 'wpranklab' );
+            }
+        }
         ?>
         <div class="wpranklab-meta-box">
             <?php if ( $scan_done ) : ?>
                 <p class="wpranklab-scan-message">
                     <?php esc_html_e( 'AI Visibility scan completed for this content.', 'wpranklab' ); ?>
+                </p>
+            <?php endif; ?>
+
+            <?php if ( $ai_msg ) : ?>
+                <p class="notice notice-info" style="padding:4px 6px;margin:0 0 6px;border-left:3px solid #0073aa;background:#f0f6fc;">
+                    <?php echo esc_html( $ai_msg ); ?>
                 </p>
             <?php endif; ?>
 
@@ -660,24 +698,20 @@ class WPRankLab_Admin {
                 </details>
             <?php endif; ?>
 
-                        
-						
-						
-						
-						
-						            <p style="margin-top: 8px;">
-                <?php
-                $scan_url = wp_nonce_url(
-                    add_query_arg(
-                        array(
-                            'action'             => 'wpranklab_scan_post',
-                            'wpranklab_post_id'  => (int) $post->ID,
-                        ),
-                        admin_url( 'admin-post.php' )
+            <?php
+            // Manual scan button (existing feature).
+            $scan_url = wp_nonce_url(
+                add_query_arg(
+                    array(
+                        'action'            => 'wpranklab_scan_post',
+                        'wpranklab_post_id' => (int) $post->ID,
                     ),
-                    'wpranklab_scan_post'
-                );
-                ?>
+                    admin_url( 'admin-post.php' )
+                ),
+                'wpranklab_scan_post'
+            );
+            ?>
+            <p style="margin-top: 8px;">
                 <a href="<?php echo esc_url( $scan_url ); ?>"
                    class="button button-secondary"
                    onclick="return confirm('<?php echo esc_js( __( 'This will reload the page. Any unsaved changes will be lost. Please click Update to save your content before running the scan. Continue?', 'wpranklab' ) ); ?>');">
@@ -685,19 +719,122 @@ class WPRankLab_Admin {
                 </a>
             </p>
 
+            <hr />
 
+            <h4><?php esc_html_e( 'AI Summary (Pro)', 'wpranklab' ); ?></h4>
+            <?php
+            $can_use_ai = $is_pro && $has_key;
+            if ( ! $is_pro ) {
+                echo '<p><em>' . esc_html__( 'Available in WPRankLab Pro.', 'wpranklab' ) . '</em></p>';
+            } elseif ( ! $has_key ) {
+                echo '<p><em>' . esc_html__( 'OpenAI API key is not configured in WPRankLab Settings.', 'wpranklab' ) . '</em></p>';
+            }
 
+            if ( $can_use_ai ) {
+                $gen_summary_url = wp_nonce_url(
+                    add_query_arg(
+                        array(
+                            'action'            => 'wpranklab_generate_summary',
+                            'wpranklab_post_id' => (int) $post->ID,
+                        ),
+                        admin_url( 'admin-post.php' )
+                    ),
+                    'wpranklab_generate_summary'
+                );
+                ?>
+                <p>
+                    <a href="<?php echo esc_url( $gen_summary_url ); ?>" class="button button-secondary">
+                        <?php esc_html_e( 'Generate AI Summary', 'wpranklab' ); ?>
+                    </a>
+                </p>
+                <?php
+                if ( ! empty( $ai_summary ) ) {
+                    $insert_summary_url = wp_nonce_url(
+                        add_query_arg(
+                            array(
+                                'action'            => 'wpranklab_insert_summary',
+                                'wpranklab_post_id' => (int) $post->ID,
+                            ),
+                            admin_url( 'admin-post.php' )
+                        ),
+                        'wpranklab_insert_summary'
+                    );
+                    ?>
+                    <div class="wpranklab-ai-block">
+                        <p>
+                            <button type="button"
+                                    class="button wpranklab-copy-btn"
+                                    data-wpranklab-copy-target="wpranklab-ai-summary-text-<?php echo (int) $post->ID; ?>">
+                                <?php esc_html_e( 'Copy', 'wpranklab' ); ?>
+                            </button>
+                            <a href="<?php echo esc_url( $insert_summary_url ); ?>" class="button">
+                                <?php esc_html_e( 'Insert Into Post', 'wpranklab' ); ?>
+                            </a>
+                        </p>
+                        <div id="wpranklab-ai-summary-text-<?php echo (int) $post->ID; ?>" class="wpranklab-ai-text">
+                            <?php echo nl2br( esc_html( $ai_summary ) ); ?>
+                        </div>
+                    </div>
+                    <?php
+                }
+            }
 
+            ?>
 
+            <hr />
 
+            <h4><?php esc_html_e( 'AI Q&A Block (Pro)', 'wpranklab' ); ?></h4>
+            <?php
+            if ( $can_use_ai ) {
+                $gen_qa_url = wp_nonce_url(
+                    add_query_arg(
+                        array(
+                            'action'            => 'wpranklab_generate_qa',
+                            'wpranklab_post_id' => (int) $post->ID,
+                        ),
+                        admin_url( 'admin-post.php' )
+                    ),
+                    'wpranklab_generate_qa'
+                );
+                ?>
+                <p>
+                    <a href="<?php echo esc_url( $gen_qa_url ); ?>" class="button button-secondary">
+                        <?php esc_html_e( 'Generate AI Q&A Block', 'wpranklab' ); ?>
+                    </a>
+                </p>
+                <?php
+                if ( ! empty( $ai_qa ) ) {
+                    $insert_qa_url = wp_nonce_url(
+                        add_query_arg(
+                            array(
+                                'action'            => 'wpranklab_insert_qa',
+                                'wpranklab_post_id' => (int) $post->ID,
+                            ),
+                            admin_url( 'admin-post.php' )
+                        ),
+                        'wpranklab_insert_qa'
+                    );
+                    ?>
+                    <div class="wpranklab-ai-block">
+                        <p>
+                            <button type="button"
+                                    class="button wpranklab-copy-btn"
+                                    data-wpranklab-copy-target="wpranklab-ai-qa-text-<?php echo (int) $post->ID; ?>">
+                                <?php esc_html_e( 'Copy', 'wpranklab' ); ?>
+                            </button>
+                            <a href="<?php echo esc_url( $insert_qa_url ); ?>" class="button">
+                                <?php esc_html_e( 'Insert Into Post', 'wpranklab' ); ?>
+                            </a>
+                        </p>
+                        <div id="wpranklab-ai-qa-text-<?php echo (int) $post->ID; ?>" class="wpranklab-ai-text">
+                            <?php echo nl2br( esc_html( $ai_qa ) ); ?>
+                        </div>
+                    </div>
+                    <?php
+                }
+            }
 
-
-
-
-
-
-
-            <?php if ( ! wpranklab_is_pro_active() ) : ?>
+            if ( ! wpranklab_is_pro_active() ) : ?>
                 <div class="wpranklab-upgrade-hint">
                     <p>
                         <?php esc_html_e( 'Upgrade to WPRankLab Pro to unlock AI-generated summaries, Q&A blocks, and deeper AI visibility analysis.', 'wpranklab' ); ?>
@@ -712,6 +849,7 @@ class WPRankLab_Admin {
         </div>
         <?php
     }
+
 
     /**
      * Handle manual post-level scan from the metabox.
@@ -792,4 +930,194 @@ class WPRankLab_Admin {
         wp_redirect( $redirect );
         exit;
     }
+
+    /**
+     * Handle AI summary generation.
+     */
+    public function handle_generate_summary() {
+        if ( ! current_user_can( 'edit_posts' ) ) {
+            wp_die( esc_html__( 'You are not allowed to do this.', 'wpranklab' ) );
+        }
+
+        check_admin_referer( 'wpranklab_generate_summary' );
+
+        $post_id = isset( $_GET['wpranklab_post_id'] ) ? (int) $_GET['wpranklab_post_id'] : 0;
+        if ( ! $post_id ) {
+            wp_die( esc_html__( 'Missing post ID.', 'wpranklab' ) );
+        }
+
+        // Only for Pro with valid license.
+        if ( ! function_exists( 'wpranklab_is_pro_active' ) || ! wpranklab_is_pro_active() ) {
+            wp_die( esc_html__( 'AI features are only available in WPRankLab Pro.', 'wpranklab' ) );
+        }
+
+        $ai = class_exists( 'WPRankLab_AI' ) ? WPRankLab_AI::get_instance() : null;
+        if ( ! $ai || ! $ai->is_available() ) {
+            $redirect = add_query_arg(
+                array(
+                    'wpranklab_ai' => 'summary_err',
+                ),
+                get_edit_post_link( $post_id, 'raw' )
+            );
+            wp_redirect( $redirect );
+            exit;
+        }
+
+        $result = $ai->generate_summary_for_post( $post_id );
+        if ( is_wp_error( $result ) ) {
+            $redirect = add_query_arg(
+                array(
+                    'wpranklab_ai' => 'summary_err',
+                ),
+                get_edit_post_link( $post_id, 'raw' )
+            );
+        } else {
+            update_post_meta( $post_id, '_wpranklab_ai_summary', $result );
+            $redirect = add_query_arg(
+                array(
+                    'wpranklab_ai' => 'summary_ok',
+                ),
+                get_edit_post_link( $post_id, 'raw' )
+            );
+        }
+
+        wp_redirect( $redirect );
+        exit;
+    }
+
+    /**
+     * Handle AI Q&A generation.
+     */
+    public function handle_generate_qa() {
+        if ( ! current_user_can( 'edit_posts' ) ) {
+            wp_die( esc_html__( 'You are not allowed to do this.', 'wpranklab' ) );
+        }
+
+        check_admin_referer( 'wpranklab_generate_qa' );
+
+        $post_id = isset( $_GET['wpranklab_post_id'] ) ? (int) $_GET['wpranklab_post_id'] : 0;
+        if ( ! $post_id ) {
+            wp_die( esc_html__( 'Missing post ID.', 'wpranklab' ) );
+        }
+
+        if ( ! function_exists( 'wpranklab_is_pro_active' ) || ! wpranklab_is_pro_active() ) {
+            wp_die( esc_html__( 'AI features are only available in WPRankLab Pro.', 'wpranklab' ) );
+        }
+
+        $ai = class_exists( 'WPRankLab_AI' ) ? WPRankLab_AI::get_instance() : null;
+        if ( ! $ai || ! $ai->is_available() ) {
+            $redirect = add_query_arg(
+                array(
+                    'wpranklab_ai' => 'qa_err',
+                ),
+                get_edit_post_link( $post_id, 'raw' )
+            );
+            wp_redirect( $redirect );
+            exit;
+        }
+
+        $result = $ai->generate_qa_for_post( $post_id );
+        if ( is_wp_error( $result ) ) {
+            $redirect = add_query_arg(
+                array(
+                    'wpranklab_ai' => 'qa_err',
+                ),
+                get_edit_post_link( $post_id, 'raw' )
+            );
+        } else {
+            update_post_meta( $post_id, '_wpranklab_ai_qa_block', $result );
+            $redirect = add_query_arg(
+                array(
+                    'wpranklab_ai' => 'qa_ok',
+                ),
+                get_edit_post_link( $post_id, 'raw' )
+            );
+        }
+
+        wp_redirect( $redirect );
+        exit;
+    }
+
+    /**
+     * Insert AI summary into post content (append at bottom).
+     */
+    public function handle_insert_summary() {
+        if ( ! current_user_can( 'edit_posts' ) ) {
+            wp_die( esc_html__( 'You are not allowed to do this.', 'wpranklab' ) );
+        }
+
+        check_admin_referer( 'wpranklab_insert_summary' );
+
+        $post_id = isset( $_GET['wpranklab_post_id'] ) ? (int) $_GET['wpranklab_post_id'] : 0;
+        if ( ! $post_id ) {
+            wp_die( esc_html__( 'Missing post ID.', 'wpranklab' ) );
+        }
+
+        $summary = get_post_meta( $post_id, '_wpranklab_ai_summary', true );
+        if ( ! empty( $summary ) ) {
+            $content = get_post_field( 'post_content', $post_id );
+            $content = (string) $content . "\n\n" . $summary;
+
+            wp_update_post(
+                array(
+                    'ID'           => $post_id,
+                    'post_content' => $content,
+                )
+            );
+        }
+
+        $redirect = add_query_arg(
+            array(
+                'wpranklab_ai' => 'insert_ok',
+            ),
+            get_edit_post_link( $post_id, 'raw' )
+        );
+
+        wp_redirect( $redirect );
+        exit;
+    }
+
+    /**
+     * Insert AI Q&A block into post content (append at bottom).
+     */
+    public function handle_insert_qa() {
+        if ( ! current_user_can( 'edit_posts' ) ) {
+            wp_die( esc_html__( 'You are not allowed to do this.', 'wpranklab' ) );
+        }
+
+        check_admin_referer( 'wpranklab_insert_qa' );
+
+        $post_id = isset( $_GET['wpranklab_post_id'] ) ? (int) $_GET['wpranklab_post_id'] : 0;
+        if ( ! $post_id ) {
+            wp_die( esc_html__( 'Missing post ID.', 'wpranklab' ) );
+        }
+
+        $qa_block = get_post_meta( $post_id, '_wpranklab_ai_qa_block', true );
+        if ( ! empty( $qa_block ) ) {
+            $content = get_post_field( 'post_content', $post_id );
+            $content = (string) $content . "\n\n" . $qa_block;
+
+            wp_update_post(
+                array(
+                    'ID'           => $post_id,
+                    'post_content' => $content,
+                )
+            );
+        }
+
+        $redirect = add_query_arg(
+            array(
+                'wpranklab_ai' => 'insert_ok',
+            ),
+            get_edit_post_link( $post_id, 'raw' )
+        );
+
+        wp_redirect( $redirect );
+        exit;
+    }
+
+
+
+
+
 }
