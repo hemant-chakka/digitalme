@@ -98,6 +98,9 @@ wpranklab_run();
  * @return bool
  */
 function wpranklab_is_pro_active() {
+    
+    return true;
+    
     if ( ! class_exists( 'WPRankLab_License_Manager' ) ) {
         return false;
     }
