@@ -166,15 +166,33 @@ class WPRankLab_AI {
         $raw  = wp_remote_retrieve_body( $response );
         $data = json_decode( $raw, true );
         
-        if ( 200 !== $code || empty( $data['choices'][0]['message']['content'] ) ) {
+        // If HTTP code is not 200, try to show the real OpenAI error.
+        if ( 200 !== $code ) {
+            $msg = 'HTTP ' . $code;
+            
+            if ( is_array( $data ) && isset( $data['error']['message'] ) ) {
+                $msg .= ' - ' . $data['error']['message'];
+            } elseif ( ! empty( $raw ) ) {
+                // Fallback: show first part of the raw body for debugging.
+                $msg .= ' - ' . substr( $raw, 0, 300 );
+            }
+            
             return new WP_Error(
                 'wpranklab_ai_bad_response',
-                __( 'OpenAI API returned an unexpected response.', 'wpranklab' )
+                $msg
+                );
+        }
+        
+        if ( empty( $data['choices'][0]['message']['content'] ) ) {
+            return new WP_Error(
+                'wpranklab_ai_bad_response',
+                __( 'OpenAI API returned an empty response.', 'wpranklab' )
                 );
         }
         
         $text = trim( (string) $data['choices'][0]['message']['content'] );
         
         return $text;
+        
     }
 }

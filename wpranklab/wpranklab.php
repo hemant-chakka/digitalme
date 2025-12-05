@@ -99,12 +99,13 @@ wpranklab_run();
  */
 function wpranklab_is_pro_active() {
     
-    return true;
-    
-    if ( ! class_exists( 'WPRankLab_License_Manager' ) ) {
-        return false;
+    //return true;
+    // Use real license manager.
+    if ( class_exists( 'WPRankLab_License_Manager' ) ) {
+        $license_manager = WPRankLab_License_Manager::get_instance();
+        return $license_manager->is_pro_active();
     }
-
-    $manager = WPRankLab_License_Manager::get_instance();
-    return $manager->is_pro_active();
+    
+    return false;
 }
+
