@@ -125,7 +125,7 @@ class WPRankLab_AI {
         $endpoint = 'https://api.openai.com/v1/chat/completions';
         
         $body = array(
-            'model'    => 'gpt-5.1-mini',
+            'model'    => 'gpt-4.1-mini',
             'messages' => array(
                 array(
                     'role'    => 'system',

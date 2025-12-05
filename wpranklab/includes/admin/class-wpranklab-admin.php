@@ -964,25 +964,23 @@ class WPRankLab_Admin {
         }
 
         $result = $ai->generate_summary_for_post( $post_id );
+        
         if ( is_wp_error( $result ) ) {
-            $redirect = add_query_arg(
-                array(
-                    'wpranklab_ai' => 'summary_err',
-                ),
-                get_edit_post_link( $post_id, 'raw' )
-            );
-        } else {
-            update_post_meta( $post_id, '_wpranklab_ai_summary', $result );
-            $redirect = add_query_arg(
-                array(
-                    'wpranklab_ai' => 'summary_ok',
-                ),
-                get_edit_post_link( $post_id, 'raw' )
-            );
+            // TEMP DEBUG: show the actual error from OpenAI / HTTP.
+            wp_die( 'WPRankLab AI error: ' . esc_html( $result->get_error_message() ) );
         }
-
+        
+        update_post_meta( $post_id, '_wpranklab_ai_summary', $result );
+        $redirect = add_query_arg(
+            array(
+                'wpranklab_ai' => 'summary_ok',
+            ),
+            get_edit_post_link( $post_id, 'raw' )
+            );
+        
         wp_redirect( $redirect );
         exit;
+        
     }
 
     /**
