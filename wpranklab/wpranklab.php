@@ -40,6 +40,10 @@ define( 'WPRANKLAB_OPTION_LICENSE',  'wpranklab_license' );
 define( 'WPRANKLAB_TABLE_HISTORY',   'wpranklab_visibility_history' );
 define( 'WPRANKLAB_TABLE_AUDIT_Q',   'wpranklab_audit_queue' );
 
+define( 'WPRANKLAB_TABLE_ENTITIES',      'wpranklab_entities' );
+define( 'WPRANKLAB_TABLE_ENTITY_POST',   'wpranklab_entity_post' );
+
+
 /**
  * Autoload simple plugin classes.
  */
@@ -99,7 +103,7 @@ wpranklab_run();
  */
 function wpranklab_is_pro_active() {
     
-    //return true;
+    return true;
     // Use real license manager.
     if ( class_exists( 'WPRankLab_License_Manager' ) ) {
         $license_manager = WPRankLab_License_Manager::get_instance();

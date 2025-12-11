@@ -556,7 +556,7 @@ class WPRankLab_Admin {
         }
     }
 
-        /**
+  /**
      * Render AI Visibility metabox in the post editor.
      *
      * @param WP_Post $post
@@ -699,6 +699,54 @@ class WPRankLab_Admin {
             <?php endif; ?>
 
             <?php
+            
+            // ------------------- START: AI Visibility Breakdown -------------------
+            // Ensure analyzer class exists
+            if ( class_exists( 'WPRankLab_Analyzer' ) ) {
+                //$analyzer_metrics = WPRankLab_Analyzer::analyze_post( $post->ID );
+                //$signals = WPRankLab_Analyzer::get_signals_for_post( $analyzer_metrics );
+                
+                $analyzer = WPRankLab_Analyzer::get_instance();
+                $analyzer_metrics = $analyzer->analyze_post( $post->ID );
+                
+                if ( is_array( $analyzer_metrics ) ) {
+                    $signals = WPRankLab_Analyzer::get_signals_for_post( $analyzer_metrics );
+                    
+                    echo '<h4 style="margin-top:15px;">' . esc_html__( 'AI Visibility Breakdown', 'wpranklab' ) . '</h4>';
+                    echo '<ul style="margin:0; padding-left:18px;">';
+                    
+                    $is_pro = function_exists( 'wpranklab_is_pro_active' ) && wpranklab_is_pro_active();
+                    
+                
+                foreach ( $signals as $index => $signal ) {
+                    // First two signals are free; others are Pro in this scheme.
+                    $is_advanced = ( $index >= 2 );
+                    
+                    if ( ! $is_pro && $is_advanced ) {
+                        // Locked (Free user)
+                        echo '<li style="margin-bottom:8px; opacity:0.55;">';
+                        echo '<span style="display:inline-block;width:10px;height:10px;background:#888;border-radius:50%;margin-right:8px;vertical-align:middle;"></span>';
+                        echo esc_html( $signal['text'] ) . ' <em>(' . esc_html__( 'Pro only', 'wpranklab' ) . ')</em>';
+                        echo '</li>';
+                        continue;
+                    }
+                    
+                    // Map status to color
+                    $color = '#888';
+                    if ( 'green' === $signal['status'] ) $color = '#27ae60';
+                    if ( 'orange' === $signal['status'] ) $color = '#f39c12';
+                    if ( 'red' === $signal['status'] ) $color = '#e74c3c';
+                    
+                    echo '<li style="margin-bottom:8px;">';
+                    echo '<span style="display:inline-block;width:10px;height:10px;background:' . esc_attr( $color ) . ';border-radius:50%;margin-right:8px;vertical-align:middle;"></span>';
+                    echo esc_html( $signal['text'] );
+                    echo '</li>';
+                }
+            }
+                echo '</ul>';
+            }
+            // -------------------- END: AI Visibility Breakdown --------------------
+            
             // Manual scan button (existing feature).
             $scan_url = wp_nonce_url(
                 add_query_arg(

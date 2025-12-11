@@ -27,8 +27,11 @@ class WPRankLab_Activator {
 
         $charset_collate = $wpdb->get_charset_collate();
 
-        $history_table = $wpdb->prefix . WPRANKLAB_TABLE_HISTORY;
-        $audit_table   = $wpdb->prefix . WPRANKLAB_TABLE_AUDIT_Q;
+        $history_table     = $wpdb->prefix . WPRANKLAB_TABLE_HISTORY;
+        $audit_table       = $wpdb->prefix . WPRANKLAB_TABLE_AUDIT_Q;
+        $entities_table    = $wpdb->prefix . WPRANKLAB_TABLE_ENTITIES;
+        $entity_post_table = $wpdb->prefix . WPRANKLAB_TABLE_ENTITY_POST;
+        
 
         // Weekly history table.
         $sql_history = "CREATE TABLE {$history_table} (
@@ -58,8 +61,39 @@ class WPRankLab_Activator {
             KEY status (status)
         ) {$charset_collate};";
 
+        // Entities master table.
+        $sql_entities = "CREATE TABLE {$entities_table} (
+    id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+    name varchar(255) NOT NULL,
+    slug varchar(255) NOT NULL,
+    type varchar(64) NOT NULL DEFAULT 'thing',
+    created_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY slug_type (slug, type)
+) {$charset_collate};";
+        
+        // Entity-to-post mapping table.
+        $sql_entity_post = "CREATE TABLE {$entity_post_table} (
+    id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+    entity_id bigint(20) unsigned NOT NULL,
+    post_id bigint(20) unsigned NOT NULL,
+    role varchar(64) NOT NULL DEFAULT 'mentioned',
+    confidence tinyint(3) unsigned NOT NULL DEFAULT 80,
+    first_seen datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_seen datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY entity_id (entity_id),
+    KEY post_id (post_id),
+    KEY entity_post (entity_id, post_id)
+) {$charset_collate};";
+        
+        
         dbDelta( $sql_history );
         dbDelta( $sql_audit );
+        dbDelta( $sql_entities );
+        dbDelta( $sql_entity_post );
+        
     }
 
     /**

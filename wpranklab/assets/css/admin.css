@@ -68,3 +68,7 @@
     border-left: 3px solid #46b450;
     font-size: 12px;
 }
+
+.wpranklab-meta-box ul { margin: 0 0 12px 18px; }
+.wpranklab-meta-box ul li { line-height: 1.4; }
+.wpranklab-meta-box h4 { margin-top: 16px; margin-bottom: 6px; font-size: 13px; }
