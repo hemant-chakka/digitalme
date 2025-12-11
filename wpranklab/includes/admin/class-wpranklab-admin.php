@@ -694,6 +694,44 @@ class WPRankLab_Admin {
                                 ?>
                             </li>
                         <?php endif; ?>
+                                <?php
+            // Show detected entities (Pro-only feature, but safe to call)
+            if ( class_exists( 'WPRankLab_Entities' ) ) :
+                $entities_service   = WPRankLab_Entities::get_instance();
+                $entities_for_post  = $entities_service->get_entities_for_post( $post->ID );
+
+                if ( ! empty( $entities_for_post ) ) :
+                    ?>
+                    <li>
+                        <strong><?php esc_html_e( 'Entities detected:', 'wpranklab' ); ?></strong><br />
+                        <?php
+                        $labels = array();
+
+                        foreach ( $entities_for_post as $entity ) {
+                            $name = isset( $entity['name'] ) ? $entity['name'] : '';
+                            $type = isset( $entity['type'] ) ? $entity['type'] : '';
+                            if ( '' === $name ) {
+                                continue;
+                            }
+
+                            $label = $name;
+                            if ( '' !== $type ) {
+                                $label .= ' (' . $type . ')';
+                            }
+
+                            $labels[] = esc_html( $label );
+                        }
+
+                        echo implode( ', ', $labels );
+                        ?>
+                    </li>
+                    <?php
+                endif;
+            endif;
+            ?>
+                    
+                    
+                    
                     </ul>
                 </details>
             <?php endif; ?>
