@@ -57,6 +57,9 @@ class WPRankLab_Admin {
             array( $this, 'handle_insert_missing_topic' )
             );
         
+        add_action( 'wp_ajax_wpranklab_missing_topic_section', array( $this, 'ajax_missing_topic_section' ) );
+        
+        
 
     }
 
@@ -259,6 +262,16 @@ class WPRankLab_Admin {
             WPRANKLAB_VERSION,
             true
         );
+        
+        wp_localize_script(
+            'wpranklab-admin',
+            'wpranklabAdmin',
+            array(
+                'ajaxUrl' => admin_url( 'admin-ajax.php' ),
+                'nonce'   => wp_create_nonce( 'wpranklab_missing_topic_section' ),
+            )
+            );
+        
     }
 
     /**
@@ -843,9 +856,9 @@ if ( ! $is_pro ) {
                 'wpranklab_insert_missing_topic_' . (int) $post->ID . '_' . (int) $index
                 );
             
-            echo '<br /><a href="' . esc_url( $url ) . '" class="button button-small">';
-            echo esc_html__( 'Insert section', 'wpranklab' );
-            echo '</a>';
+            echo '<br />';
+            echo '<a href="' . esc_url( $url ) . '" class="button button-small wpranklab-insert-missing-topic" data-postid="' . (int) $post->ID . '" data-topic="' . esc_attr( $topic ) . '">Insert section</a>';
+            
         }
         
         echo '</li>';
@@ -1359,6 +1372,50 @@ if ( ! $is_pro ) {
         wp_redirect( get_edit_post_link( $post_id, 'raw' ) );
         exit;
     }
+    
+    /**
+     * AJAX: Generate missing-topic section HTML (for cursor insertion in Block Editor).
+     */
+    public function ajax_missing_topic_section() {
+        
+        if ( ! current_user_can( 'edit_posts' ) ) {
+            wp_send_json_error( array( 'message' => 'Not allowed.' ), 403 );
+        }
+        
+        check_ajax_referer( 'wpranklab_missing_topic_section', 'nonce' );
+        
+        // Pro gate.
+        if ( ! function_exists( 'wpranklab_is_pro_active' ) || ! wpranklab_is_pro_active() ) {
+            wp_send_json_error( array( 'message' => 'Pro license required.' ), 403 );
+        }
+        
+        $post_id = isset( $_POST['post_id'] ) ? (int) $_POST['post_id'] : 0;
+        $topic   = isset( $_POST['topic'] ) ? sanitize_text_field( wp_unslash( $_POST['topic'] ) ) : '';
+        
+        if ( $post_id <= 0 || '' === $topic ) {
+            wp_send_json_error( array( 'message' => 'Invalid request.' ), 400 );
+        }
+        
+        if ( ! class_exists( 'WPRankLab_AI' ) ) {
+            wp_send_json_error( array( 'message' => 'AI engine unavailable.' ), 500 );
+        }
+        
+        $ai = WPRankLab_AI::get_instance();
+        if ( ! $ai || ! method_exists( $ai, 'generate_missing_topic_section' ) ) {
+            wp_send_json_error( array( 'message' => 'Missing topic section generator not found.' ), 500 );
+        }
+        
+        $section = $ai->generate_missing_topic_section( $post_id, $topic );
+        if ( is_wp_error( $section ) ) {
+            wp_send_json_error( array( 'message' => $section->get_error_message() ), 500 );
+        }
+        
+        wp_send_json_success( array(
+            'html'  => (string) $section,
+            'topic' => (string) $topic,
+        ) );
+    }
+    
     
 
 
