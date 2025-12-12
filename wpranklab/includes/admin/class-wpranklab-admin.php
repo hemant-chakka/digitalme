@@ -51,6 +51,12 @@ class WPRankLab_Admin {
         add_action( 'admin_post_wpranklab_generate_qa', array( $this, 'handle_generate_qa' ) );
         add_action( 'admin_post_wpranklab_insert_summary', array( $this, 'handle_insert_summary' ) );
         add_action( 'admin_post_wpranklab_insert_qa', array( $this, 'handle_insert_qa' ) );
+        
+        add_action(
+            'admin_post_wpranklab_insert_missing_topic',
+            array( $this, 'handle_insert_missing_topic' )
+            );
+        
 
     }
 
@@ -802,25 +808,49 @@ if ( ! $is_pro ) {
     echo '<p><em>' . esc_html__( 'Run the scan again to retry.', 'wpranklab' ) . '</em></p>';
 } elseif ( is_array( $mt_data ) && ! empty( $mt_data['missing_topics'] ) && is_array( $mt_data['missing_topics'] ) ) {
     echo '<ul style="margin:0; padding-left:18px;">';
-    foreach ( $mt_data['missing_topics'] as $item ) {
+    $inserted = (array) get_post_meta( $post->ID, '_wpranklab_inserted_missing_topics', true );
+    
+    foreach ( $mt_data['missing_topics'] as $index => $item ) {
+        
         $topic    = isset( $item['topic'] ) ? (string) $item['topic'] : '';
         $reason   = isset( $item['reason'] ) ? (string) $item['reason'] : '';
         $priority = isset( $item['priority'] ) ? (string) $item['priority'] : '';
-
+        
         if ( '' === $topic ) {
             continue;
         }
-
-        echo '<li style="margin-bottom:8px;">';
+        
+        echo '<li style="margin-bottom:10px;">';
         echo '<strong>' . esc_html( $topic ) . '</strong>';
+        
         if ( $priority ) {
             echo ' <small style="opacity:0.7;">(' . esc_html( $priority ) . ')</small>';
         }
+        
         if ( $reason ) {
             echo '<br /><span style="opacity:0.85;">' . esc_html( $reason ) . '</span>';
         }
+        
+        if ( in_array( $topic, $inserted, true ) ) {
+            echo '<br /><em style="color:#2ecc71;">' . esc_html__( 'Inserted', 'wpranklab' ) . '</em>';
+        } else {
+            $url = wp_nonce_url(
+                admin_url(
+                    'admin-post.php?action=wpranklab_insert_missing_topic'
+                    . '&post_id=' . (int) $post->ID
+                    . '&topic_index=' . (int) $index
+                    ),
+                'wpranklab_insert_missing_topic_' . (int) $post->ID . '_' . (int) $index
+                );
+            
+            echo '<br /><a href="' . esc_url( $url ) . '" class="button button-small">';
+            echo esc_html__( 'Insert section', 'wpranklab' );
+            echo '</a>';
+        }
+        
         echo '</li>';
     }
+    
     echo '</ul>';
 
     if ( ! empty( $mt_data['suggested_questions'] ) && is_array( $mt_data['suggested_questions'] ) ) {
@@ -1262,6 +1292,74 @@ if ( ! $is_pro ) {
         wp_redirect( $redirect );
         exit;
     }
+    
+    /**
+     * Insert a missing topic as an H2 section (Pro).
+     */
+    public function handle_insert_missing_topic() {
+        
+        if ( ! function_exists( 'wpranklab_is_pro_active' ) || ! wpranklab_is_pro_active() ) {
+            wp_die( esc_html__( 'Pro license required.', 'wpranklab' ) );
+        }
+        
+        $post_id = isset( $_GET['post_id'] ) ? (int) $_GET['post_id'] : 0;
+        $index   = isset( $_GET['topic_index'] ) ? (int) $_GET['topic_index'] : -1;
+        
+        check_admin_referer( 'wpranklab_insert_missing_topic_' . $post_id . '_' . $index );
+        
+        if ( $post_id <= 0 || $index < 0 ) {
+            wp_die( esc_html__( 'Invalid request.', 'wpranklab' ) );
+        }
+        
+        $post = get_post( $post_id );
+        if ( ! $post ) {
+            wp_die( esc_html__( 'Post not found.', 'wpranklab' ) );
+        }
+        
+        $mt_data = get_post_meta( $post_id, '_wpranklab_missing_topics', true );
+        if ( ! is_array( $mt_data ) || empty( $mt_data['missing_topics'][ $index ] ) ) {
+            wp_die( esc_html__( 'Missing topic not found.', 'wpranklab' ) );
+        }
+        
+        $topic = trim( (string) $mt_data['missing_topics'][ $index ]['topic'] );
+        if ( '' === $topic ) {
+            wp_die( esc_html__( 'Invalid topic.', 'wpranklab' ) );
+        }
+        
+        // Prevent duplicate inserts
+        $inserted = (array) get_post_meta( $post_id, '_wpranklab_inserted_missing_topics', true );
+        if ( in_array( $topic, $inserted, true ) ) {
+            wp_die( esc_html__( 'This topic was already inserted.', 'wpranklab' ) );
+        }
+        
+        if ( ! class_exists( 'WPRankLab_AI' ) ) {
+            wp_die( esc_html__( 'AI engine unavailable.', 'wpranklab' ) );
+        }
+        
+        $ai = WPRankLab_AI::get_instance();
+        if ( ! $ai || ! $ai->is_available() ) {
+            wp_die( esc_html__( 'AI is not configured.', 'wpranklab' ) );
+        }
+        
+        $section = $ai->generate_missing_topic_section( $post_id, $topic );
+        if ( is_wp_error( $section ) ) {
+            wp_die( esc_html( $section->get_error_message() ) );
+        }
+        
+        $new_content = rtrim( $post->post_content ) . "\n\n" . $section . "\n\n";
+        
+        wp_update_post( array(
+            'ID'           => $post_id,
+            'post_content' => $new_content,
+        ) );
+        
+        $inserted[] = $topic;
+        update_post_meta( $post_id, '_wpranklab_inserted_missing_topics', $inserted );
+        
+        wp_redirect( get_edit_post_link( $post_id, 'raw' ) );
+        exit;
+    }
+    
 
 
 

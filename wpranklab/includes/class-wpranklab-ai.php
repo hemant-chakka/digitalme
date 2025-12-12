@@ -202,6 +202,44 @@ class WPRankLab_AI {
         return $data;
     }
     
+    /**
+     * Generate an H2 section for a missing topic.
+     *
+     * @param int    $post_id
+     * @param string $topic
+     * @return string|WP_Error
+     */
+    public function generate_missing_topic_section( $post_id, $topic ) {
+        
+        $post = get_post( $post_id );
+        if ( ! $post ) {
+            return new WP_Error( 'wpranklab_no_post', __( 'Post not found.', 'wpranklab' ) );
+        }
+        
+        $title = (string) $post->post_title;
+        
+        $prompt = sprintf(
+            "Write a concise, AI-friendly content section for the topic below.\n\n" .
+            "Rules:\n" .
+            "- Start with a clear H2 heading\n" .
+            "- Follow with 1–2 short paragraphs\n" .
+            "- Be factual, neutral, and helpful\n" .
+            "- Do NOT mention AI, ChatGPT, or models\n\n" .
+            "Post title: %s\n\n" .
+            "Missing topic to cover: %s",
+            $title,
+            $topic
+            );
+        
+        $text = $this->call_chat_api( $prompt );
+        if ( is_wp_error( $text ) ) {
+            return $text;
+        }
+        
+        return trim( $text );
+    }
+    
+    
     
     /**
      * Call OpenAI chat completion API (gpt-5.1-mini) with a simple text prompt.
