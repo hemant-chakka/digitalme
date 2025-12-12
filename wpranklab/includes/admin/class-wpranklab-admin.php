@@ -785,6 +785,61 @@ class WPRankLab_Admin {
                 echo '</ul>';
             }
             // -------------------- END: AI Visibility Breakdown --------------------
+            ?>
+            <hr />
+
+<h4><?php esc_html_e( 'Missing Topics (Pro)', 'wpranklab' ); ?></h4>
+<?php
+$mt_data  = get_post_meta( $post->ID, '_wpranklab_missing_topics', true );
+$mt_error = get_post_meta( $post->ID, '_wpranklab_missing_topics_error', true );
+
+if ( ! $is_pro ) {
+    echo '<p><em>' . esc_html__( 'Available in WPRankLab Pro.', 'wpranklab' ) . '</em></p>';
+} elseif ( ! $has_key ) {
+    echo '<p><em>' . esc_html__( 'OpenAI API key is not configured in WPRankLab Settings.', 'wpranklab' ) . '</em></p>';
+} elseif ( $mt_error ) {
+    echo '<p style="color:#b32d2e;">' . esc_html( $mt_error ) . '</p>';
+    echo '<p><em>' . esc_html__( 'Run the scan again to retry.', 'wpranklab' ) . '</em></p>';
+} elseif ( is_array( $mt_data ) && ! empty( $mt_data['missing_topics'] ) && is_array( $mt_data['missing_topics'] ) ) {
+    echo '<ul style="margin:0; padding-left:18px;">';
+    foreach ( $mt_data['missing_topics'] as $item ) {
+        $topic    = isset( $item['topic'] ) ? (string) $item['topic'] : '';
+        $reason   = isset( $item['reason'] ) ? (string) $item['reason'] : '';
+        $priority = isset( $item['priority'] ) ? (string) $item['priority'] : '';
+
+        if ( '' === $topic ) {
+            continue;
+        }
+
+        echo '<li style="margin-bottom:8px;">';
+        echo '<strong>' . esc_html( $topic ) . '</strong>';
+        if ( $priority ) {
+            echo ' <small style="opacity:0.7;">(' . esc_html( $priority ) . ')</small>';
+        }
+        if ( $reason ) {
+            echo '<br /><span style="opacity:0.85;">' . esc_html( $reason ) . '</span>';
+        }
+        echo '</li>';
+    }
+    echo '</ul>';
+
+    if ( ! empty( $mt_data['suggested_questions'] ) && is_array( $mt_data['suggested_questions'] ) ) {
+        echo '<details style="margin-top:8px;">';
+        echo '<summary>' . esc_html__( 'Suggested questions to add', 'wpranklab' ) . '</summary>';
+        echo '<ul style="padding-left:18px;">';
+        foreach ( array_slice( $mt_data['suggested_questions'], 0, 8 ) as $q ) {
+            $q = trim( (string) $q );
+            if ( '' === $q ) continue;
+            echo '<li>' . esc_html( $q ) . '</li>';
+        }
+        echo '</ul>';
+        echo '</details>';
+    }
+
+} else {
+    echo '<p><em>' . esc_html__( 'Run “AI Visibility Scan” to generate missing topic suggestions.', 'wpranklab' ) . '</em></p>';
+}
+            
             
             // Manual scan button (existing feature).
             $scan_url = wp_nonce_url(
@@ -951,9 +1006,14 @@ class WPRankLab_Admin {
         $post_id = isset( $_GET['wpranklab_post_id'] ) ? (int) $_GET['wpranklab_post_id'] : 0;
 
         if ( $post_id && class_exists( 'WPRankLab_Analyzer' ) ) {
+            
+            // Flag this run as a manual scan so Pro modules can safely do API work.
+            set_transient( 'wpranklab_force_missing_topics_' . $post_id, 1, 60 );
+            
             $analyzer = WPRankLab_Analyzer::get_instance();
             $analyzer->analyze_post( $post_id );
         }
+        
 
         if ( $post_id ) {
             $redirect = add_query_arg(

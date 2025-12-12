@@ -50,7 +50,13 @@ class WPRankLab {
             $history = WPRankLab_History::get_instance();
             $history->init();
         }
-
+        
+        // Initialize Pro missing topic detector (manual scans only).
+        if ( class_exists( 'WPRankLab_Missing_Topics' ) ) {
+            $mt = WPRankLab_Missing_Topics::get_instance();
+            $mt->init();
+        }
+        
         if ( is_admin() && class_exists( 'WPRankLab_Admin' ) ) {
             $this->load_admin();
         }

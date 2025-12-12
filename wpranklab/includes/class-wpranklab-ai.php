@@ -110,6 +110,100 @@ class WPRankLab_AI {
     }
     
     /**
+     * Pro: Generate missing topic / coverage suggestions for a post.
+     *
+     * Returns an array:
+     * [
+     *   'missing_topics' => [
+     *      ['topic' => '...', 'reason' => '...', 'priority' => 'high|medium|low']
+     *   ],
+     *   'suggested_questions' => ['...','...']
+     * ]
+     *
+     * @param int   $post_id
+     * @param array $entities_for_post
+     *
+     * @return array|WP_Error
+     */
+    public function generate_missing_topics_for_post( $post_id, $entities_for_post = array() ) {
+        
+        $post = get_post( $post_id );
+        if ( ! $post ) {
+            return new WP_Error( 'wpranklab_ai_no_post', __( 'Post not found.', 'wpranklab' ) );
+        }
+        
+        $title   = (string) $post->post_title;
+        $content = (string) $post->post_content;
+        
+        // Keep prompt size reasonable.
+        $plain = wp_strip_all_tags( $content );
+        if ( strlen( $plain ) > 6000 ) {
+            $plain = substr( $plain, 0, 6000 );
+        }
+        
+        // Normalize entities into a compact list.
+        $entity_labels = array();
+        if ( is_array( $entities_for_post ) ) {
+            foreach ( $entities_for_post as $e ) {
+                $name = isset( $e['name'] ) ? (string) $e['name'] : '';
+                $type = isset( $e['type'] ) ? (string) $e['type'] : '';
+                if ( '' === $name ) {
+                    continue;
+                }
+                $entity_labels[] = $type ? ( $name . ' (' . $type . ')' ) : $name;
+            }
+        }
+        $entity_text = empty( $entity_labels ) ? 'None detected' : implode( ', ', array_slice( $entity_labels, 0, 25 ) );
+        
+        $prompt = sprintf(
+            "You are an AI visibility auditor for AI search engines (ChatGPT, Gemini, Claude, Perplexity).\n\n" .
+            "Task: Identify missing topical coverage for the page below. Suggest key missing subtopics / concepts that would improve AI understanding and answer completeness.\n\n" .
+            "Rules:\n" .
+            "- Output ONLY valid JSON.\n" .
+            "- JSON schema:\n" .
+            "{\n" .
+            "  \"missing_topics\": [\n" .
+            "    {\"topic\": \"...\", \"reason\": \"...\", \"priority\": \"high|medium|low\"}\n" .
+            "  ],\n" .
+            "  \"suggested_questions\": [\"...\", \"...\", \"...\"]\n" .
+            "}\n" .
+            "- Provide 4 to 8 missing_topics.\n" .
+            "- Reasons should be short (max 1 sentence).\n" .
+            "- Priorities should reflect impact on AI visibility.\n\n" .
+            "Title: %s\n\n" .
+            "Detected entities: %s\n\n" .
+            "Content:\n%s",
+            $title,
+            $entity_text,
+            $plain
+            );
+        
+        $raw = $this->call_chat_api( $prompt );
+        if ( is_wp_error( $raw ) ) {
+            return $raw;
+        }
+        
+        // Attempt to parse JSON safely (sometimes models wrap in text).
+        $json = $this->extract_first_json_object( $raw );
+        $data = json_decode( $json, true );
+        
+        if ( ! is_array( $data ) ) {
+            return new WP_Error( 'wpranklab_ai_bad_json', __( 'OpenAI returned invalid JSON for missing topics.', 'wpranklab' ) );
+        }
+        
+        // Minimal normalization.
+        if ( ! isset( $data['missing_topics'] ) || ! is_array( $data['missing_topics'] ) ) {
+            $data['missing_topics'] = array();
+        }
+        if ( ! isset( $data['suggested_questions'] ) || ! is_array( $data['suggested_questions'] ) ) {
+            $data['suggested_questions'] = array();
+        }
+        
+        return $data;
+    }
+    
+    
+    /**
      * Call OpenAI chat completion API (gpt-5.1-mini) with a simple text prompt.
      *
      * @param string $prompt
@@ -195,4 +289,29 @@ class WPRankLab_AI {
         return $text;
         
     }
+    
+    /**
+     * Extract the first JSON object from a string (best-effort).
+     *
+     * @param string $text
+     * @return string
+     */
+    protected function extract_first_json_object( $text ) {
+        $text = trim( (string) $text );
+        
+        // If it already starts with {, assume JSON.
+        if ( '' !== $text && '{' === $text[0] ) {
+            return $text;
+        }
+        
+        $start = strpos( $text, '{' );
+        $end   = strrpos( $text, '}' );
+        
+        if ( false !== $start && false !== $end && $end > $start ) {
+            return substr( $text, $start, $end - $start + 1 );
+        }
+        
+        return $text;
+    }
+    
 }
