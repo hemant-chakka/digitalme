@@ -286,10 +286,27 @@ class WPRankLab_Analyzer {
     /**
      * Convert metrics into human-friendly “signals” for the checklist.
      *
-     * @param array $metrics
+     * Backwards compatible:
+     * - Old call:  get_signals_for_post( $metrics )
+     * - New call:  get_signals_for_post( $post_id, $metrics )
+     *
+     * @param mixed $arg1  Either $metrics (array) or $post_id (int)
+     * @param mixed $arg2  Optional $metrics (array) when $arg1 is post_id
+     *
      * @return array[]
      */
-    public static function get_signals_for_post( $metrics ) {
+    public static function get_signals_for_post( $arg1, $arg2 = null ) {
+        
+        // --- Determine $post_id and $metrics based on how this was called ---
+        if ( is_array( $arg1 ) && null === $arg2 ) {
+            // Old style: get_signals_for_post( $metrics )
+            $post_id = 0;
+            $metrics = $arg1;
+        } else {
+            // New style: get_signals_for_post( $post_id, $metrics )
+            $post_id = (int) $arg1;
+            $metrics = is_array( $arg2 ) ? $arg2 : array();
+        }
         
         $defaults = array(
             'word_count'      => 0,
@@ -372,6 +389,51 @@ class WPRankLab_Analyzer {
             );
         }
         
-        return $signals;
+        // 6) Entity clarity (Pro-only, only when we know $post_id).
+        if ( $post_id > 0
+            && class_exists( 'WPRankLab_Entities' )
+            && function_exists( 'wpranklab_is_pro_active' )
+            && wpranklab_is_pro_active()
+            ) {
+                $entities_service  = WPRankLab_Entities::get_instance();
+                $entities_for_post = $entities_service->get_entities_for_post( $post_id );
+                
+                $entity_count  = is_array( $entities_for_post ) ? count( $entities_for_post ) : 0;
+                $main_entities = 0;
+                
+                if ( $entity_count > 0 ) {
+                    foreach ( $entities_for_post as $entity ) {
+                        if ( isset( $entity['role'] ) && 'main' === $entity['role'] ) {
+                            $main_entities++;
+                        }
+                    }
+                }
+                
+                if ( 0 === $entity_count ) {
+                    $signals[] = array(
+                        'status' => 'red',
+                        'text'   => __( 'No clear entities detected. Focus the content on a primary topic or entity.', 'wpranklab' ),
+                    );
+                } elseif ( $entity_count > 0 && $entity_count <= 6 && $main_entities >= 1 ) {
+                    $signals[] = array(
+                        'status' => 'green',
+                        'text'   => __( 'Entity focus looks good. AI can clearly identify the main topic.', 'wpranklab' ),
+                    );
+                } elseif ( $entity_count > 10 ) {
+                    $signals[] = array(
+                        'status' => 'orange',
+                        'text'   => __( 'Many entities detected. Consider tightening focus on 1–3 main topics.', 'wpranklab' ),
+                    );
+                } else {
+                    $signals[] = array(
+                        'status' => 'orange',
+                        'text'   => __( 'Entities detected, but the main topic could be clearer. Emphasize your primary entity.', 'wpranklab' ),
+                    );
+                }
+            }
+            
+            return $signals;
     }
+    
+
 }

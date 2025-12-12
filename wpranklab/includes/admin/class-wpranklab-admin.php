@@ -748,7 +748,8 @@ class WPRankLab_Admin {
                 $analyzer_metrics = $analyzer->analyze_post( $post->ID );
                 
                 if ( is_array( $analyzer_metrics ) ) {
-                    $signals = WPRankLab_Analyzer::get_signals_for_post( $analyzer_metrics );
+                    
+                    $signals = WPRankLab_Analyzer::get_signals_for_post( $post->ID, $analyzer_metrics );
                     
                     echo '<h4 style="margin-top:15px;">' . esc_html__( 'AI Visibility Breakdown', 'wpranklab' ) . '</h4>';
                     echo '<ul style="margin:0; padding-left:18px;">';
