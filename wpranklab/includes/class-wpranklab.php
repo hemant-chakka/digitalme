@@ -57,6 +57,11 @@ class WPRankLab {
             $mt->init();
         }
         
+        if ( class_exists( 'WPRankLab_Schema' ) ) {
+            WPRankLab_Schema::get_instance()->init();
+        }
+        
+        
         if ( is_admin() && class_exists( 'WPRankLab_Admin' ) ) {
             $this->load_admin();
         }

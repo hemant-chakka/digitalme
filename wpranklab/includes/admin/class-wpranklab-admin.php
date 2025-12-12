@@ -883,7 +883,60 @@ if ( ! $is_pro ) {
     echo '<p><em>' . esc_html__( 'Run “AI Visibility Scan” to generate missing topic suggestions.', 'wpranklab' ) . '</em></p>';
 }
             
-            
+   
+?>
+
+<hr />
+<h4><?php esc_html_e( 'Schema Recommendations (Pro)', 'wpranklab' ); ?></h4>
+<?php
+$schema = get_post_meta( $post->ID, '_wpranklab_schema_recommendations', true );
+
+if ( ! $is_pro ) {
+    echo '<p><em>' . esc_html__( 'Available in WPRankLab Pro.', 'wpranklab' ) . '</em></p>';
+} elseif ( ! is_array( $schema ) || empty( $schema['recommended'] ) ) {
+    echo '<p><em>' . esc_html__( 'Run “AI Visibility Scan” to generate schema recommendations.', 'wpranklab' ) . '</em></p>';
+} else {
+
+    if ( ! empty( $schema['existing'] ) && is_array( $schema['existing'] ) ) {
+        $existing_labels = array();
+        foreach ( $schema['existing'] as $k => $v ) {
+            if ( $v ) {
+                $existing_labels[] = strtoupper( $k );
+            }
+        }
+        if ( ! empty( $existing_labels ) ) {
+            echo '<p><small style="opacity:0.8;">' . esc_html__( 'Detected:', 'wpranklab' ) . ' ' . esc_html( implode( ', ', $existing_labels ) ) . '</small></p>';
+        }
+    }
+
+    foreach ( $schema['recommended'] as $i => $item ) {
+        $type   = isset( $item['type'] ) ? (string) $item['type'] : '';
+        $reason = isset( $item['reason'] ) ? (string) $item['reason'] : '';
+        $jsonld = isset( $item['jsonld'] ) ? (string) $item['jsonld'] : '';
+
+        if ( '' === $type ) continue;
+
+        echo '<div style="margin-bottom:10px; padding:8px; border:1px solid #e5e5e5; border-radius:6px;">';
+        echo '<strong>' . esc_html( $type ) . '</strong>';
+        if ( $reason ) {
+            echo '<br /><span style="opacity:0.85;">' . esc_html( $reason ) . '</span>';
+        }
+
+        if ( $jsonld ) {
+            $ta_id = 'wpranklab_schema_' . (int) $post->ID . '_' . (int) $i;
+            echo '<textarea readonly id="' . esc_attr( $ta_id ) . '" style="width:100%; margin-top:8px; font-family:monospace;" rows="7">';
+            echo esc_textarea( $jsonld );
+            echo '</textarea>';
+
+            echo '<button type="button" class="button button-small wpranklab-copy-schema" data-target="' . esc_attr( $ta_id ) . '" style="margin-top:6px;">';
+            echo esc_html__( 'Copy JSON-LD', 'wpranklab' );
+            echo '</button>';
+        }
+
+        echo '</div>';
+    }
+}
+
             // Manual scan button (existing feature).
             $scan_url = wp_nonce_url(
                 add_query_arg(
@@ -1052,6 +1105,8 @@ if ( ! $is_pro ) {
             
             // Flag this run as a manual scan so Pro modules can safely do API work.
             set_transient( 'wpranklab_force_missing_topics_' . $post_id, 1, 60 );
+            
+            set_transient( 'wpranklab_force_schema_' . $post_id, 1, 60 );
             
             $analyzer = WPRankLab_Analyzer::get_instance();
             $analyzer->analyze_post( $post_id );

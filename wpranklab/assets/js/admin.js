@@ -127,3 +127,24 @@
   });
 })(window.wp);
 
+
+document.addEventListener("click", function (e) {
+  const btn = e.target.closest(".wpranklab-copy-schema");
+  if (!btn) return;
+
+  const targetId = btn.getAttribute("data-target");
+  const ta = document.getElementById(targetId);
+  if (!ta) return;
+
+  ta.select();
+  ta.setSelectionRange(0, ta.value.length);
+
+  try {
+    document.execCommand("copy");
+    const old = btn.innerText;
+    btn.innerText = "Copied!";
+    setTimeout(() => (btn.innerText = old), 900);
+  } catch (err) {
+    alert("Copy failed. Please copy manually.");
+  }
+});
