@@ -59,6 +59,7 @@ class WPRankLab_Admin {
         
         add_action( 'wp_ajax_wpranklab_missing_topic_section', array( $this, 'ajax_missing_topic_section' ) );
         
+        add_action( 'admin_post_wpranklab_toggle_schema', array( $this, 'handle_toggle_schema' ) );
         
 
     }
@@ -909,6 +910,13 @@ if ( ! $is_pro ) {
         }
     }
 
+    $enabled_schema = get_post_meta( $post->ID, '_wpranklab_schema_enabled', true );
+    if ( ! is_array( $enabled_schema ) ) {
+        $enabled_schema = array();
+    }
+    
+    
+    
     foreach ( $schema['recommended'] as $i => $item ) {
         $type   = isset( $item['type'] ) ? (string) $item['type'] : '';
         $reason = isset( $item['reason'] ) ? (string) $item['reason'] : '';
@@ -931,6 +939,29 @@ if ( ! $is_pro ) {
             echo '<button type="button" class="button button-small wpranklab-copy-schema" data-target="' . esc_attr( $ta_id ) . '" style="margin-top:6px;">';
             echo esc_html__( 'Copy JSON-LD', 'wpranklab' );
             echo '</button>';
+            
+            $is_enabled = isset( $enabled_schema[ $type ] );
+            
+            $mode = $is_enabled ? 'disable' : 'enable';
+            
+            $toggle_url = wp_nonce_url(
+                admin_url(
+                    'admin-post.php?action=wpranklab_toggle_schema'
+                    . '&post_id=' . (int) $post->ID
+                    . '&type=' . rawurlencode( $type )
+                    . '&mode=' . $mode
+                    ),
+                'wpranklab_toggle_schema_' . (int) $post->ID . '_' . $type . '_' . $mode
+                );
+            
+            echo ' <a href="' . esc_url( $toggle_url ) . '" class="button button-small" style="margin-left:6px;">';
+            echo $is_enabled ? esc_html__( 'Disable output', 'wpranklab' ) : esc_html__( 'Enable output', 'wpranklab' );
+            echo '</a>';
+            
+            if ( $is_enabled ) {
+                echo '<div style="margin-top:6px;"><small style="color:#1e7e34;">' . esc_html__( 'Enabled: outputting on frontend.', 'wpranklab' ) . '</small></div>';
+            }
+            
         }
 
         echo '</div>';
@@ -1471,6 +1502,62 @@ if ( ! $is_pro ) {
         ) );
     }
     
+    /**
+     * Enable/Disable schema output for a post (Pro).
+     */
+    public function handle_toggle_schema() {
+        
+        if ( ! function_exists( 'wpranklab_is_pro_active' ) || ! wpranklab_is_pro_active() ) {
+            wp_die( esc_html__( 'Pro license required.', 'wpranklab' ) );
+        }
+        
+        $post_id = isset( $_GET['post_id'] ) ? (int) $_GET['post_id'] : 0;
+        $type    = isset( $_GET['type'] ) ? sanitize_text_field( wp_unslash( $_GET['type'] ) ) : '';
+        $mode    = isset( $_GET['mode'] ) ? sanitize_text_field( wp_unslash( $_GET['mode'] ) ) : '';
+        
+        if ( $post_id <= 0 || '' === $type || ! in_array( $mode, array( 'enable', 'disable' ), true ) ) {
+            wp_die( esc_html__( 'Invalid request.', 'wpranklab' ) );
+        }
+        
+        check_admin_referer( 'wpranklab_toggle_schema_' . $post_id . '_' . $type . '_' . $mode );
+        
+        if ( ! class_exists( 'WPRankLab_Schema' ) ) {
+            wp_die( esc_html__( 'Schema module unavailable.', 'wpranklab' ) );
+        }
+        
+        $schema = WPRankLab_Schema::get_instance();
+        
+        if ( 'enable' === $mode ) {
+            
+            $reco = get_post_meta( $post_id, '_wpranklab_schema_recommendations', true );
+            if ( ! is_array( $reco ) || empty( $reco['recommended'] ) ) {
+                wp_die( esc_html__( 'No schema recommendations found. Run a scan first.', 'wpranklab' ) );
+            }
+            
+            $jsonld = '';
+            foreach ( $reco['recommended'] as $item ) {
+                if ( isset( $item['type'] ) && (string) $item['type'] === $type && ! empty( $item['jsonld'] ) ) {
+                    $jsonld = (string) $item['jsonld'];
+                    break;
+                }
+            }
+            
+            if ( '' === $jsonld ) {
+                wp_die( esc_html__( 'Schema JSON not found for this type.', 'wpranklab' ) );
+            }
+            
+            $ok = $schema->enable_schema_for_post( $post_id, $type, $jsonld );
+            if ( ! $ok ) {
+                wp_die( esc_html__( 'Could not enable schema (invalid JSON).', 'wpranklab' ) );
+            }
+            
+        } else {
+            $schema->disable_schema_for_post( $post_id, $type );
+        }
+        
+        wp_redirect( get_edit_post_link( $post_id, 'raw' ) );
+        exit;
+    }
     
 
 

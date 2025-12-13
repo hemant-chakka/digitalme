@@ -22,6 +22,8 @@ class WPRankLab_Schema {
     
     public function init() {
         add_action( 'wpranklab_after_analyze_post', array( $this, 'maybe_generate_recommendations' ), 30, 2 );
+        add_action( 'wp_head', array( $this, 'output_enabled_schema' ), 20 );
+        
     }
     
     /**
@@ -222,4 +224,103 @@ class WPRankLab_Schema {
         
         return wp_json_encode( $data, JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT );
     }
+    
+    /**
+     * Frontend: output enabled JSON-LD for the current singular post.
+     */
+    public function output_enabled_schema() {
+        
+        // Pro gate + kill-switch safety
+        if ( ! function_exists( 'wpranklab_is_pro_active' ) || ! wpranklab_is_pro_active() ) {
+            return;
+        }
+        
+        if ( ! is_singular() ) {
+            return;
+        }
+        
+        $post_id = get_queried_object_id();
+        if ( ! $post_id ) {
+            return;
+        }
+        
+        $enabled = get_post_meta( $post_id, '_wpranklab_schema_enabled', true );
+        if ( ! is_array( $enabled ) || empty( $enabled ) ) {
+            return;
+        }
+        
+        foreach ( $enabled as $type => $jsonld ) {
+            $type  = sanitize_text_field( (string) $type );
+            $json  = (string) $jsonld;
+            
+            if ( '' === $type || '' === $json ) {
+                continue;
+            }
+            
+            // Validate JSON before output
+            $decoded = json_decode( $json, true );
+            if ( ! is_array( $decoded ) ) {
+                continue;
+            }
+            
+            echo "\n" . '<script type="application/ld+json" data-wpranklab-schema="' . esc_attr( $type ) . '">';
+            echo wp_json_encode( $decoded, JSON_UNESCAPED_SLASHES );
+            echo '</script>' . "\n";
+        }
+    }
+    
+    /**
+     * Enable a schema item (stores JSON-LD under postmeta).
+     */
+    public function enable_schema_for_post( $post_id, $type, $jsonld ) {
+        
+        $post_id = (int) $post_id;
+        $type    = sanitize_text_field( (string) $type );
+        $jsonld  = (string) $jsonld;
+        
+        if ( $post_id <= 0 || '' === $type || '' === $jsonld ) {
+            return false;
+        }
+        
+        $decoded = json_decode( $jsonld, true );
+        if ( ! is_array( $decoded ) ) {
+            return false;
+        }
+        
+        $enabled = get_post_meta( $post_id, '_wpranklab_schema_enabled', true );
+        if ( ! is_array( $enabled ) ) {
+            $enabled = array();
+        }
+        
+        $enabled[ $type ] = wp_json_encode( $decoded, JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT );
+        update_post_meta( $post_id, '_wpranklab_schema_enabled', $enabled );
+        
+        return true;
+    }
+    
+    /**
+     * Disable a schema item.
+     */
+    public function disable_schema_for_post( $post_id, $type ) {
+        
+        $post_id = (int) $post_id;
+        $type    = sanitize_text_field( (string) $type );
+        
+        if ( $post_id <= 0 || '' === $type ) {
+            return false;
+        }
+        
+        $enabled = get_post_meta( $post_id, '_wpranklab_schema_enabled', true );
+        if ( ! is_array( $enabled ) ) {
+            return false;
+        }
+        
+        if ( isset( $enabled[ $type ] ) ) {
+            unset( $enabled[ $type ] );
+            update_post_meta( $post_id, '_wpranklab_schema_enabled', $enabled );
+        }
+        
+        return true;
+    }
+    
 }
