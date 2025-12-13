@@ -940,6 +940,14 @@ if ( ! $is_pro ) {
             echo esc_html__( 'Copy JSON-LD', 'wpranklab' );
             echo '</button>';
             
+            // Warn if FAQ schema is still a template (placeholders).
+            if ( false !== strpos( $jsonld, 'QUESTION_1' ) || false !== strpos( $jsonld, 'ANSWER_1' ) ) {
+                echo '<div style="margin-top:6px;"><small style="color:#b32d2e;">'
+                . esc_html__( 'FAQ schema is a template. Add an AI Q&A block (or Q&A headings) and rescan to auto-fill.', 'wpranklab' )
+                . '</small></div>';
+            }
+            
+            
             $is_enabled = isset( $enabled_schema[ $type ] );
             
             $mode = $is_enabled ? 'disable' : 'enable';

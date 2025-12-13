@@ -129,7 +129,8 @@ class WPRankLab_Schema {
             $reco['recommended'][] = array(
                 'type'   => 'FAQPage',
                 'reason' => __( 'FAQ schema helps AI extract Q&A pairs and improves answer-style visibility.', 'wpranklab' ),
-                'jsonld' => $this->jsonld_faq_template( $post_id ),
+                'jsonld' => ( $this->jsonld_faq_autofill( $post_id ) ?: $this->jsonld_faq_template( $post_id ) ),
+                
             );
         }
         
@@ -322,5 +323,279 @@ class WPRankLab_Schema {
         
         return true;
     }
+    
+    /**
+     * Try to extract FAQ Q&A pairs from postmeta or content.
+     *
+     * Returns array of pairs:
+     * [
+     *   ['q' => 'Question?', 'a' => 'Answer...'],
+     *   ...
+     * ]
+     */
+    protected function extract_faq_pairs_for_post( $post_id ) {
+        
+        $post_id = (int) $post_id;
+        if ( $post_id <= 0 ) {
+            return array();
+        }
+        
+        // --- 1) Try postmeta keys (robust: supports different versions) ---
+        $candidate_keys = array(
+            '_wpranklab_ai_qa',           // common
+            '_wpranklab_ai_qna',
+            '_wpranklab_ai_qa_data',
+            '_wpranklab_qa',
+            '_wpranklab_qna',
+            '_wpranklab_ai_qa_block',     // if saved block payload
+            'wpranklab_ai_qa',            // non-underscored
+        );
+        
+        foreach ( $candidate_keys as $key ) {
+            $raw = get_post_meta( $post_id, $key, true );
+            $pairs = $this->normalize_qa_storage_to_pairs( $raw );
+            if ( ! empty( $pairs ) ) {
+                return $pairs;
+            }
+        }
+        
+        // --- 2) Fallback: parse content (best effort) ---
+        $post = get_post( $post_id );
+        if ( ! $post ) {
+            return array();
+        }
+        
+        $content = (string) $post->post_content;
+        $pairs   = $this->extract_qa_pairs_from_content( $content );
+        
+        return $pairs;
+    }
+    
+    /**
+     * Normalize different stored QA formats into pairs.
+     *
+     * Accepts:
+     * - array of ['question'=>..,'answer'=>..]
+     * - array of ['q'=>..,'a'=>..]
+     * - array of arrays/objects
+     * - JSON string of above
+     * - string containing Q:/A: patterns
+     */
+    protected function normalize_qa_storage_to_pairs( $raw ) {
+        
+        if ( empty( $raw ) ) {
+            return array();
+        }
+        
+        // If JSON string, decode it.
+        if ( is_string( $raw ) ) {
+            $trim = trim( $raw );
+            if ( '' !== $trim && ( '{' === $trim[0] || '[' === $trim[0] ) ) {
+                $decoded = json_decode( $trim, true );
+                if ( is_array( $decoded ) ) {
+                    $raw = $decoded;
+                }
+            }
+        }
+        
+        $pairs = array();
+        
+        // Case: array already
+        if ( is_array( $raw ) ) {
+            
+            // Some formats wrap in ['items'=>[...]] or ['qa'=>[...]]
+            if ( isset( $raw['items'] ) && is_array( $raw['items'] ) ) {
+                $raw = $raw['items'];
+            } elseif ( isset( $raw['qa'] ) && is_array( $raw['qa'] ) ) {
+                $raw = $raw['qa'];
+            } elseif ( isset( $raw['questions'] ) && is_array( $raw['questions'] ) ) {
+                $raw = $raw['questions'];
+            }
+            
+            foreach ( $raw as $item ) {
+                if ( ! is_array( $item ) ) {
+                    continue;
+                }
+                
+                $q = '';
+                $a = '';
+                
+                if ( isset( $item['question'] ) ) $q = (string) $item['question'];
+                if ( isset( $item['answer'] ) )   $a = (string) $item['answer'];
+                
+                if ( '' === $q && isset( $item['q'] ) ) $q = (string) $item['q'];
+                if ( '' === $a && isset( $item['a'] ) ) $a = (string) $item['a'];
+                
+                // Sometimes: ['title'=>..., 'content'=>...]
+                if ( '' === $q && isset( $item['title'] ) )   $q = (string) $item['title'];
+                if ( '' === $a && isset( $item['content'] ) ) $a = (string) $item['content'];
+                
+                $q = trim( wp_strip_all_tags( $q ) );
+                $a = trim( wp_strip_all_tags( $a ) );
+                
+                if ( '' !== $q && '' !== $a ) {
+                    $pairs[] = array( 'q' => $q, 'a' => $a );
+                }
+            }
+        }
+        
+        // Case: string with Q:/A:
+        if ( empty( $pairs ) && is_string( $raw ) ) {
+            $pairs = $this->extract_qa_pairs_from_text( $raw );
+        }
+        
+        // Limit to a reasonable count for schema.
+        if ( count( $pairs ) > 20 ) {
+            $pairs = array_slice( $pairs, 0, 20 );
+        }
+        
+        return $pairs;
+    }
+    
+    /**
+     * Extract Q/A from raw text patterns like:
+     * Q: ...
+     * A: ...
+     */
+    protected function extract_qa_pairs_from_text( $text ) {
+        
+        $text = (string) $text;
+        $lines = preg_split( "/\r\n|\n|\r/", $text );
+        
+        $pairs = array();
+        $q = '';
+        $a = '';
+        
+        foreach ( $lines as $line ) {
+            $line = trim( $line );
+            
+            if ( preg_match( '/^(Q:|Question:)\s*(.+)$/i', $line, $m ) ) {
+                if ( '' !== $q && '' !== $a ) {
+                    $pairs[] = array( 'q' => trim( $q ), 'a' => trim( $a ) );
+                }
+                $q = trim( $m[2] );
+                $a = '';
+                continue;
+            }
+            
+            if ( preg_match( '/^(A:|Answer:)\s*(.+)$/i', $line, $m ) ) {
+                $a = trim( $m[2] );
+                continue;
+            }
+            
+            // Continuations
+            if ( '' !== $a ) {
+                $a .= ' ' . $line;
+            } elseif ( '' !== $q ) {
+                $q .= ' ' . $line;
+            }
+        }
+        
+        if ( '' !== $q && '' !== $a ) {
+            $pairs[] = array( 'q' => trim( $q ), 'a' => trim( $a ) );
+        }
+        
+        return $pairs;
+    }
+    
+    /**
+     * Extract Q/A pairs from post content by looking for headings with '?' and following paragraphs.
+     * Best-effort only.
+     */
+    protected function extract_qa_pairs_from_content( $content ) {
+        
+        $content = (string) $content;
+        
+        // Simple approach: split by headings and find question headings.
+        // Works for many "FAQ" layouts.
+        $pairs = array();
+        
+        // Normalize to plain text around headings.
+        // We'll detect <h2>/<h3> etc with question marks.
+        if ( preg_match_all( '/<(h2|h3|h4)[^>]*>(.*?)<\/\1>/is', $content, $matches, PREG_OFFSET_CAPTURE ) ) {
+            
+            $headings = $matches[2]; // [ [text, offset], ... ]
+            foreach ( $headings as $i => $h ) {
+                $q_html = $h[0];
+                $q      = trim( wp_strip_all_tags( $q_html ) );
+                
+                if ( '' === $q || false === strpos( $q, '?' ) ) {
+                    continue;
+                }
+                
+                // Take slice after this heading until next heading.
+                $start = $matches[0][ $i ][1] + strlen( $matches[0][ $i ][0] );
+                $end   = isset( $matches[0][ $i + 1 ] ) ? $matches[0][ $i + 1 ][1] : strlen( $content );
+                
+                $slice = substr( $content, $start, max( 0, $end - $start ) );
+                $a     = trim( wp_strip_all_tags( $slice ) );
+                
+                // Keep first ~400 chars as answer (schema shouldn't be huge)
+                if ( strlen( $a ) > 450 ) {
+                    $a = substr( $a, 0, 450 );
+                }
+                
+                $a = trim( preg_replace( '/\s+/', ' ', $a ) );
+                
+                if ( '' !== $a ) {
+                    $pairs[] = array( 'q' => $q, 'a' => $a );
+                }
+                
+                if ( count( $pairs ) >= 12 ) {
+                    break;
+                }
+            }
+        }
+        
+        return $pairs;
+    }
+    
+    /**
+     * Build real FAQPage JSON-LD from extracted pairs. Returns empty string if none.
+     */
+    protected function jsonld_faq_autofill( $post_id ) {
+        
+        $pairs = $this->extract_faq_pairs_for_post( $post_id );
+        if ( empty( $pairs ) ) {
+            return '';
+        }
+        
+        $entities = array();
+        
+        foreach ( $pairs as $p ) {
+            $q = isset( $p['q'] ) ? trim( (string) $p['q'] ) : '';
+            $a = isset( $p['a'] ) ? trim( (string) $p['a'] ) : '';
+            
+            if ( '' === $q || '' === $a ) {
+                continue;
+            }
+            
+            $entities[] = array(
+                '@type' => 'Question',
+                'name'  => $q,
+                'acceptedAnswer' => array(
+                    '@type' => 'Answer',
+                    'text'  => $a,
+                ),
+            );
+            
+            if ( count( $entities ) >= 12 ) {
+                break;
+            }
+        }
+        
+        if ( empty( $entities ) ) {
+            return '';
+        }
+        
+        $data = array(
+            '@context'   => 'https://schema.org',
+            '@type'      => 'FAQPage',
+            'mainEntity' => $entities,
+        );
+        
+        return wp_json_encode( $data, JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT );
+    }
+    
     
 }
