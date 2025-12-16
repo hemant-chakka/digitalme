@@ -61,6 +61,7 @@ class WPRankLab_Admin {
         
         add_action( 'admin_post_wpranklab_toggle_schema', array( $this, 'handle_toggle_schema' ) );
         
+        
 
     }
 
@@ -947,6 +948,14 @@ if ( ! $is_pro ) {
                 . '</small></div>';
             }
             
+            // Warn if HowTo schema is still a template (placeholders).
+            if ( 'HowTo' === $type && false !== strpos( $jsonld, 'Describe step 1' ) ) {
+                echo '<div style="margin-top:6px;"><small style="color:#b32d2e;">'
+                . esc_html__( 'HowTo schema is a template. Add a clear ordered list of steps (1,2,3...) or "Step 1: ..." format, then rescan to auto-fill.', 'wpranklab' )
+                . '</small></div>';
+            }
+            
+            
             
             $is_enabled = isset( $enabled_schema[ $type ] );
             
@@ -975,6 +984,38 @@ if ( ! $is_pro ) {
         echo '</div>';
     }
 }
+
+?>
+
+<hr />
+<h4><?php esc_html_e( 'Internal Link Suggestions (Pro)', 'wpranklab' ); ?></h4>
+<?php
+$sugs = get_post_meta( $post->ID, '_wpranklab_internal_link_suggestions', true );
+
+if ( ! $is_pro ) {
+    echo '<p><em>' . esc_html__( 'Available in WPRankLab Pro.', 'wpranklab' ) . '</em></p>';
+} elseif ( ! is_array( $sugs ) || empty( $sugs ) ) {
+    echo '<p><em>' . esc_html__( 'Run “AI Visibility Scan” to generate internal link suggestions.', 'wpranklab' ) . '</em></p>';
+} else {
+    echo '<ul style="margin:0; padding-left:18px;">';
+    foreach ( $sugs as $i => $s ) {
+        $url    = isset( $s['url'] ) ? (string) $s['url'] : '';
+        $title  = isset( $s['title'] ) ? (string) $s['title'] : '';
+        $reason = isset( $s['reason'] ) ? (string) $s['reason'] : '';
+        if ( '' === $url || '' === $title ) continue;
+
+        echo '<li style="margin-bottom:10px;">';
+        echo '<strong><a href="' . esc_url( $url ) . '" target="_blank" rel="noopener noreferrer">' . esc_html( $title ) . '</a></strong>';
+        if ( $reason ) {
+            echo '<br /><small style="opacity:0.8;">' . esc_html( $reason ) . '</small>';
+        }
+        // Insert UX (cursor insert) will be added next patch (AJAX + JS), similar to Missing Topics.
+        echo '</li>';
+    }
+    echo '</ul>';
+}
+
+
 
             // Manual scan button (existing feature).
             $scan_url = wp_nonce_url(
@@ -1146,6 +1187,9 @@ if ( ! $is_pro ) {
             set_transient( 'wpranklab_force_missing_topics_' . $post_id, 1, 60 );
             
             set_transient( 'wpranklab_force_schema_' . $post_id, 1, 60 );
+            
+            set_transient( 'wpranklab_force_internal_links_' . $post_id, 1, 60 );
+            
             
             $analyzer = WPRankLab_Analyzer::get_instance();
             $analyzer->analyze_post( $post_id );

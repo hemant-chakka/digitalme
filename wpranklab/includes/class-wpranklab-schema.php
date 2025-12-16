@@ -144,7 +144,8 @@ class WPRankLab_Schema {
             $reco['recommended'][] = array(
                 'type'   => 'HowTo',
                 'reason' => __( 'HowTo schema makes step-by-step instructions explicit for AI and rich results.', 'wpranklab' ),
-                'jsonld' => $this->jsonld_howto_template( $post_id ),
+                'jsonld' => ( $this->jsonld_howto_autofill( $post_id ) ?: $this->jsonld_howto_template( $post_id ) ),
+                
             );
         }
         
@@ -277,6 +278,16 @@ class WPRankLab_Schema {
         
         $post_id = (int) $post_id;
         $type    = sanitize_text_field( (string) $type );
+        
+        // If enabling HowTo, prefer auto-filled steps if available.
+        if ( 'HowTo' === $type ) {
+            $auto = $this->jsonld_howto_autofill( $post_id );
+            if ( '' !== $auto ) {
+                $jsonld = $auto;
+            }
+        }
+        
+        
         $jsonld  = (string) $jsonld;
         
         if ( $post_id <= 0 || '' === $type || '' === $jsonld ) {
@@ -596,6 +607,182 @@ class WPRankLab_Schema {
         
         return wp_json_encode( $data, JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT );
     }
+    
+    /**
+     * Extract HowTo steps from post content (best effort).
+     *
+     * Returns array of strings (step texts).
+     */
+    protected function extract_howto_steps_for_post( $post_id ) {
+        
+        $post_id = (int) $post_id;
+        if ( $post_id <= 0 ) {
+            return array();
+        }
+        
+        $post = get_post( $post_id );
+        if ( ! $post ) {
+            return array();
+        }
+        
+        $content = (string) $post->post_content;
+        
+        // 1) Prefer ordered lists (<ol><li>...)
+        $steps = $this->extract_steps_from_ordered_lists( $content );
+        if ( ! empty( $steps ) ) {
+            return $steps;
+        }
+        
+        // 2) Fall back to "Step 1: ..." patterns
+        $steps = $this->extract_steps_from_step_patterns( $content );
+        if ( ! empty( $steps ) ) {
+            return $steps;
+        }
+        
+        return array();
+    }
+    
+    /**
+     * Extract steps from ordered lists in HTML content.
+     */
+    protected function extract_steps_from_ordered_lists( $content ) {
+        
+        $content = (string) $content;
+        
+        // Grab the first reasonably-sized <ol>...</ol>
+        if ( ! preg_match_all( '/<ol\b[^>]*>(.*?)<\/ol>/is', $content, $ols ) ) {
+            return array();
+        }
+        
+        foreach ( $ols[1] as $ol_inner ) {
+            
+            if ( ! preg_match_all( '/<li\b[^>]*>(.*?)<\/li>/is', $ol_inner, $lis ) ) {
+                continue;
+            }
+            
+            $steps = array();
+            
+            foreach ( $lis[1] as $li_html ) {
+                $text = trim( wp_strip_all_tags( $li_html ) );
+                $text = preg_replace( '/\s+/', ' ', $text );
+                $text = trim( $text );
+                
+                // Skip tiny bullets
+                if ( strlen( $text ) < 8 ) {
+                    continue;
+                }
+                
+                // Keep each step compact for schema
+                if ( strlen( $text ) > 280 ) {
+                    $text = substr( $text, 0, 280 );
+                    $text = rtrim( $text );
+                }
+                
+                $steps[] = $text;
+                
+                if ( count( $steps ) >= 12 ) {
+                    break;
+                }
+            }
+            
+            // Accept only if it looks like real steps
+            if ( count( $steps ) >= 2 ) {
+                return $steps;
+            }
+        }
+        
+        return array();
+    }
+    
+    /**
+     * Extract steps from plain text patterns like:
+     * Step 1: ...
+     * Step 2: ...
+     */
+    protected function extract_steps_from_step_patterns( $content ) {
+        
+        $plain = trim( wp_strip_all_tags( (string) $content ) );
+        $plain = preg_replace( '/\s+/', ' ', $plain );
+        
+        // Split on Step N markers
+        if ( ! preg_match_all( '/\bStep\s*(\d{1,2})\s*[:.\-]\s*/i', $plain, $m, PREG_OFFSET_CAPTURE ) ) {
+            return array();
+        }
+        
+        $markers = $m[0]; // each has [text, offset]
+        $steps   = array();
+        
+        for ( $i = 0; $i < count( $markers ); $i++ ) {
+            $start = $markers[$i][1] + strlen( $markers[$i][0] );
+            $end   = isset( $markers[$i + 1] ) ? $markers[$i + 1][1] : strlen( $plain );
+            
+            $slice = trim( substr( $plain, $start, max( 0, $end - $start ) ) );
+            if ( '' === $slice ) {
+                continue;
+            }
+            
+            // Trim to a reasonable length
+            if ( strlen( $slice ) > 280 ) {
+                $slice = substr( $slice, 0, 280 );
+                $slice = rtrim( $slice );
+            }
+            
+            $steps[] = $slice;
+            
+            if ( count( $steps ) >= 12 ) {
+                break;
+            }
+        }
+        
+        return ( count( $steps ) >= 2 ) ? $steps : array();
+    }
+    
+    /**
+     * Build real HowTo JSON-LD from extracted steps. Returns empty string if none.
+     */
+    protected function jsonld_howto_autofill( $post_id ) {
+        
+        $steps = $this->extract_howto_steps_for_post( $post_id );
+        if ( empty( $steps ) || count( $steps ) < 2 ) {
+            return '';
+        }
+        
+        $step_items = array();
+        $n = 1;
+        
+        foreach ( $steps as $text ) {
+            $text = trim( (string) $text );
+            if ( '' === $text ) {
+                continue;
+            }
+            
+            $step_items[] = array(
+                '@type' => 'HowToStep',
+                'name'  => 'Step ' . $n,
+                'text'  => $text,
+            );
+            
+            $n++;
+            
+            if ( count( $step_items ) >= 12 ) {
+                break;
+            }
+        }
+        
+        if ( count( $step_items ) < 2 ) {
+            return '';
+        }
+        
+        $data = array(
+            '@context' => 'https://schema.org',
+            '@type'    => 'HowTo',
+            'name'     => get_the_title( $post_id ),
+            'step'     => $step_items,
+        );
+        
+        return wp_json_encode( $data, JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT );
+    }
+    
     
     
 }
