@@ -35,6 +35,8 @@ class WPRankLab_Internal_Links {
     protected function build_suggestions( $post_id ) {
         
         $post = get_post( $post_id );
+        $already_linked = $this->get_already_linked_post_ids( $post_id );
+        
         if ( ! $post ) return array();
         
         $suggestions = array();
@@ -67,7 +69,8 @@ class WPRankLab_Internal_Links {
                 
                 if ( ! empty( $words ) ) {
                     $more = $this->suggest_by_title_match( $post_id, $words, 6, 'keyword' );
-                    $suggestions = $this->merge_unique_suggestions( $suggestions, $more, 8 );
+                    $suggestions = $this->merge_unique_suggestions( $suggestions, $more, $already_linked, 8 );
+                    
                 }
         }
         
@@ -121,17 +124,46 @@ class WPRankLab_Internal_Links {
         return $out;
     }
     
-    protected function merge_unique_suggestions( $a, $b, $max = 8 ) {
+    protected function merge_unique_suggestions( $a, $b, $already_linked, $max = 8 ) {
         $seen = array();
         $out  = array();
         
         foreach ( array_merge( (array) $a, (array) $b ) as $s ) {
             $tid = isset( $s['target_id'] ) ? (int) $s['target_id'] : 0;
-            if ( $tid <= 0 || isset( $seen[ $tid ] ) ) continue;
+            if ( $tid <= 0 || isset( $seen[ $tid ] ) || in_array( $tid, $already_linked, true ) ) {
+                continue;
+            }
             $seen[ $tid ] = true;
             $out[] = $s;
             if ( count( $out ) >= $max ) break;
         }
         return $out;
     }
+    
+    /**
+     * Get post IDs already linked from this post.
+     */
+    protected function get_already_linked_post_ids( $post_id ) {
+        
+        $post = get_post( $post_id );
+        if ( ! $post ) return array();
+        
+        $content = (string) $post->post_content;
+        if ( '' === $content ) return array();
+        
+        $linked_ids = array();
+        
+        // Match href URLs
+        if ( preg_match_all( '/href=["\']([^"\']+)["\']/i', $content, $matches ) ) {
+            foreach ( $matches[1] as $url ) {
+                $linked_post_id = url_to_postid( $url );
+                if ( $linked_post_id ) {
+                    $linked_ids[ (int) $linked_post_id ] = true;
+                }
+            }
+        }
+        
+        return array_keys( $linked_ids );
+    }
+    
 }

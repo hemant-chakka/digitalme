@@ -65,7 +65,7 @@ class WPRankLab_Admin {
         
         add_action( 'wp_ajax_wpranklab_internal_link_block', array( $this, 'ajax_internal_link_block' ) );
         
-        
+        add_action( 'admin_notices', array( $this, 'maybe_show_internal_link_notice' ) );
 
     }
 
@@ -1660,6 +1660,20 @@ if ( ! $is_pro ) {
         $url    = get_permalink( $target_id );
         $anchor = get_the_title( $target_id );
         
+        $post = get_post( $post_id );
+        $target_url = get_permalink( $target_id );
+        
+        if ( $target_url && false !== strpos( (string) $post->post_content, $target_url ) ) {
+            // Redirect back with a message flag (no JSON output in admin-post).
+            $edit = add_query_arg(
+            array( 'wpranklab_il' => 'already_linked' ),
+            get_edit_post_link( $post_id, 'raw' )
+            );
+            wp_redirect( $edit );
+            exit;
+        }
+        
+        
         $html = '<p><a href="' . esc_url( $url ) . '">' . esc_html( $anchor ) . '</a></p>';
         
         // Append safely
@@ -1703,6 +1717,14 @@ if ( ! $is_pro ) {
             wp_send_json_error( array( 'message' => 'Target not found.' ), 404 );
         }
         
+        $post = get_post( $post_id );
+        if ( $post && false !== strpos( $post->post_content, get_permalink( $target_id ) ) ) {
+            wp_send_json_error( array(
+                'message' => 'This post is already linked.'
+            ), 409 );
+        }
+        
+        
         $html = '<p><a href="' . esc_url( $url ) . '">' . esc_html( $anchor ) . '</a></p>';
         
         wp_send_json_success( array(
@@ -1710,7 +1732,21 @@ if ( ! $is_pro ) {
         ) );
     }
     
-
+    public function maybe_show_internal_link_notice() {
+        
+        if ( empty( $_GET['wpranklab_il'] ) ) {
+            return;
+        }
+        
+        $flag = sanitize_text_field( wp_unslash( $_GET['wpranklab_il'] ) );
+        
+        if ( 'already_linked' === $flag ) {
+            echo '<div class="notice notice-warning is-dismissible"><p>'
+                . esc_html__( 'That internal link already exists in this post.', 'wpranklab' )
+                . '</p></div>';
+        }
+    }
+    
 
 
 

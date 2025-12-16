@@ -159,7 +159,6 @@ document.addEventListener("click", function (e) {
   e.preventDefault();
   e.stopPropagation();
 
-
   const postId   = el.getAttribute("data-postid");
   const targetId = el.getAttribute("data-targetid");
 
@@ -192,18 +191,24 @@ document.addEventListener("click", function (e) {
 	  } else {
 	    // Insert after cursor block
 	    dispatch.insertBlocks(blocks, index);
-	  }
-
-
+	  } 
 	  el.innerText = "Inserted (click Update)";
 	  return false;
 
     })
-    .catch(() => {
-      el.removeAttribute("disabled");
-      el.innerText = oldText;
-      window.location.href = el.getAttribute("href"); // fallback
-    });
+	.catch(err => {
+	  const msg = (err && err.message) ? err.message : "";
+	  el.removeAttribute("disabled");
+	  el.innerText = oldText;
+
+	  if (msg && msg.toLowerCase().includes("already")) {
+	    alert(msg);
+	    return false; // do NOT navigate
+	  }
+
+	  // Only for real errors, use fallback
+	  window.location.href = el.getAttribute("href");
+	});
 });
 
 
