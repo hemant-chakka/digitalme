@@ -148,3 +148,72 @@ document.addEventListener("click", function (e) {
     alert("Copy failed. Please copy manually.");
   }
 });
+
+
+document.addEventListener("click", function (e) {
+  const el = e.target.closest(".wpranklab-insert-internal-link");
+  if (!el || typeof wpranklabAdmin === "undefined") return;
+
+  if (!window.wp || !wp.data || !wp.blocks) return;
+
+  e.preventDefault();
+  e.stopPropagation();
+
+
+  const postId   = el.getAttribute("data-postid");
+  const targetId = el.getAttribute("data-targetid");
+
+  if (!postId || !targetId) return;
+
+  el.setAttribute("disabled", "disabled");
+  const oldText = el.innerText;
+  el.innerText = "Inserting…";
+
+  const fd = new FormData();
+  fd.append("action", "wpranklab_internal_link_block");
+  fd.append("nonce", wpranklabAdmin.nonce);
+  fd.append("post_id", postId);
+  fd.append("target_id", targetId);
+
+  fetch(wpranklabAdmin.ajaxUrl, { method: "POST", body: fd, credentials: "same-origin" })
+    .then(r => r.json())
+    .then(res => {
+      if (!res.success || !res.data || !res.data.html) {
+        throw new Error("Failed");
+      }
+
+      const blocks = wp.blocks.parse(res.data.html);
+      const dispatch = wp.data.dispatch("core/block-editor");
+	  const index = wpranklabGetInsertIndex();
+
+	  if (index === null) {
+	    // No cursor selection → append at end
+	    dispatch.insertBlocks(blocks);
+	  } else {
+	    // Insert after cursor block
+	    dispatch.insertBlocks(blocks, index);
+	  }
+
+
+	  el.innerText = "Inserted (click Update)";
+	  return false;
+
+    })
+    .catch(() => {
+      el.removeAttribute("disabled");
+      el.innerText = oldText;
+      window.location.href = el.getAttribute("href"); // fallback
+    });
+});
+
+
+function wpranklabGetInsertIndex() {
+  const editor = wp.data.select("core/block-editor");
+  if (!editor || !editor.getSelectedBlockClientId) return null;
+
+  const selectedId = editor.getSelectedBlockClientId();
+  if (!selectedId) return null;
+
+  const index = editor.getBlockIndex(selectedId);
+  return (typeof index === "number") ? index + 1 : null;
+}

@@ -61,10 +61,14 @@ class WPRankLab {
             WPRankLab_Schema::get_instance()->init();
         }
         
+        if ( class_exists( 'WPRankLab_Internal_Links' ) ) {
+            WPRankLab_Internal_Links::get_instance()->init();
+        }
         
         if ( is_admin() && class_exists( 'WPRankLab_Admin' ) ) {
             $this->load_admin();
         }
+        
 
         // Future: add more cron hooks, REST routes, etc.
     }

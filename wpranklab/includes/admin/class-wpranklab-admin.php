@@ -61,6 +61,10 @@ class WPRankLab_Admin {
         
         add_action( 'admin_post_wpranklab_toggle_schema', array( $this, 'handle_toggle_schema' ) );
         
+        add_action( 'admin_post_wpranklab_insert_internal_link', array( $this, 'handle_insert_internal_link' ) );
+        
+        add_action( 'wp_ajax_wpranklab_internal_link_block', array( $this, 'ajax_internal_link_block' ) );
+        
         
 
     }
@@ -1009,7 +1013,25 @@ if ( ! $is_pro ) {
         if ( $reason ) {
             echo '<br /><small style="opacity:0.8;">' . esc_html( $reason ) . '</small>';
         }
-        // Insert UX (cursor insert) will be added next patch (AJAX + JS), similar to Missing Topics.
+        $insert_url = wp_nonce_url(
+            admin_url(
+                'admin-post.php?action=wpranklab_insert_internal_link'
+                . '&post_id=' . (int) $post->ID
+                . '&target_id=' . (int) $s['target_id']
+                ),
+            'wpranklab_insert_internal_link_' . (int) $post->ID . '_' . (int) $s['target_id']
+            );
+        
+        echo '<br />';
+        echo '<a href="' . esc_url( $insert_url ) . '"
+    class="button button-small wpranklab-insert-internal-link"
+    data-postid="' . (int) $post->ID . '"
+    data-targetid="' . (int) $s['target_id'] . '"
+    data-url="' . esc_url( $url ) . '"
+    data-anchor="' . esc_attr( $title ) . '">
+    Insert link
+</a>';
+        
         echo '</li>';
     }
     echo '</ul>';
@@ -1611,7 +1633,83 @@ if ( ! $is_pro ) {
         exit;
     }
     
-
+    /**
+     * Fallback: append internal link to post content.
+     */
+    public function handle_insert_internal_link() {
+        
+        if ( ! function_exists( 'wpranklab_is_pro_active' ) || ! wpranklab_is_pro_active() ) {
+            wp_die( esc_html__( 'Pro license required.', 'wpranklab' ) );
+        }
+        
+        $post_id   = isset( $_GET['post_id'] ) ? (int) $_GET['post_id'] : 0;
+        $target_id = isset( $_GET['target_id'] ) ? (int) $_GET['target_id'] : 0;
+        
+        if ( $post_id <= 0 || $target_id <= 0 ) {
+            wp_die( esc_html__( 'Invalid request.', 'wpranklab' ) );
+        }
+        
+        check_admin_referer( 'wpranklab_insert_internal_link_' . $post_id . '_' . $target_id );
+        
+        $post   = get_post( $post_id );
+        $target = get_post( $target_id );
+        if ( ! $post || ! $target ) {
+            wp_die( esc_html__( 'Post not found.', 'wpranklab' ) );
+        }
+        
+        $url    = get_permalink( $target_id );
+        $anchor = get_the_title( $target_id );
+        
+        $html = '<p><a href="' . esc_url( $url ) . '">' . esc_html( $anchor ) . '</a></p>';
+        
+        // Append safely
+        $post->post_content .= "\n\n" . $html;
+        wp_update_post( array(
+            'ID'           => $post_id,
+            'post_content' => $post->post_content,
+        ) );
+        
+        wp_redirect( get_edit_post_link( $post_id, 'raw' ) );
+        exit;
+    }
+    
+    
+    /**
+     * AJAX: generate internal link block HTML.
+     */
+    public function ajax_internal_link_block() {
+        
+        if ( ! current_user_can( 'edit_posts' ) ) {
+            wp_send_json_error( array( 'message' => 'Not allowed.' ), 403 );
+        }
+        
+        check_ajax_referer( 'wpranklab_missing_topic_section', 'nonce' ); // reuse existing nonce
+        
+        if ( ! function_exists( 'wpranklab_is_pro_active' ) || ! wpranklab_is_pro_active() ) {
+            wp_send_json_error( array( 'message' => 'Pro required.' ), 403 );
+        }
+        
+        $post_id   = isset( $_POST['post_id'] ) ? (int) $_POST['post_id'] : 0;
+        $target_id = isset( $_POST['target_id'] ) ? (int) $_POST['target_id'] : 0;
+        
+        if ( $post_id <= 0 || $target_id <= 0 ) {
+            wp_send_json_error( array( 'message' => 'Invalid request.' ), 400 );
+        }
+        
+        $url    = get_permalink( $target_id );
+        $anchor = get_the_title( $target_id );
+        
+        if ( ! $url || ! $anchor ) {
+            wp_send_json_error( array( 'message' => 'Target not found.' ), 404 );
+        }
+        
+        $html = '<p><a href="' . esc_url( $url ) . '">' . esc_html( $anchor ) . '</a></p>';
+        
+        wp_send_json_success( array(
+            'html' => $html,
+        ) );
+    }
+    
 
 
 
