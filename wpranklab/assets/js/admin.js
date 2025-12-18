@@ -175,45 +175,9 @@ document.addEventListener("click", function (e) {
   fd.append("target_id", targetId);
 
   fetch(wpranklabAdmin.ajaxUrl, { method: "POST", body: fd, credentials: "same-origin" })
-    .then(async (r) => {
-      // Preserve HTTP status for smarter handling (WP AJAX may return 4xx on purpose).
-      let json;
-      try {
-        json = await r.json();
-      } catch (e) {
-        throw new Error("Bad response from server");
-      }
-      json.__httpStatus = r.status;
-      return json;
-    })
+    .then(r => r.json())
     .then(res => {
-      // Handle known/expected errors WITHOUT navigating away.
-      if (!res.success) {
-        const msg = (res && res.data && res.data.message) ? String(res.data.message) : "";
-        const isAlready = (res.__httpStatus === 409) || (msg && msg.toLowerCase().includes("already"));
-
-        el.removeAttribute("disabled");
-        el.innerText = oldText;
-
-        if (isAlready) {
-          // Prefer Gutenberg notices; fallback to alert.
-          try {
-            if (wp && wp.data && wp.data.dispatch) {
-              wp.data.dispatch("core/notices").createNotice("warning", msg || "This post is already linked.", { isDismissible: true });
-            } else {
-              alert(msg || "This post is already linked.");
-            }
-          } catch (e) {
-            alert(msg || "This post is already linked.");
-          }
-          return false;
-        }
-
-        // Unknown error (fall through to fallback navigation below via catch).
-        throw new Error(msg || "Failed");
-      }
-
-      if (!res.data || !res.data.html) {
+      if (!res.success || !res.data || !res.data.html) {
         throw new Error("Failed");
       }
 
@@ -233,9 +197,16 @@ document.addEventListener("click", function (e) {
 
     })
 	.catch(err => {
-	  // Only for real errors (network/parse/unknown), use fallback.
+	  const msg = (err && err.message) ? err.message : "";
 	  el.removeAttribute("disabled");
 	  el.innerText = oldText;
+
+	  if (msg && msg.toLowerCase().includes("already")) {
+	    alert(msg);
+	    return false; // do NOT navigate
+	  }
+
+	  // Only for real errors, use fallback
 	  window.location.href = el.getAttribute("href");
 	});
 });

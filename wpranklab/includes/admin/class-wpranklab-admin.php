@@ -67,6 +67,92 @@ class WPRankLab_Admin {
         
         add_action( 'admin_notices', array( $this, 'maybe_show_internal_link_notice' ) );
 
+        // Dev helper: add backdated score snapshots for testing weekly deltas (no OpenAI calls).
+        add_action( 'admin_post_wpranklab_add_test_snapshot', array( $this, 'handle_add_test_snapshot' ) );
+
+    }
+
+    /**
+     * Dev helper to create a (backdated) history snapshot without calling OpenAI.
+     *
+     * URL: /wp-admin/admin-post.php?action=wpranklab_add_test_snapshot&post_id=123&days=7&_wpnonce=...
+     */
+    public function handle_add_test_snapshot() {
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_die( esc_html__( 'You do not have permission to do that.', 'wpranklab' ) );
+        }
+
+        check_admin_referer( 'wpranklab_add_test_snapshot' );
+
+        $post_id = isset( $_GET['post_id'] ) ? (int) $_GET['post_id'] : 0;
+        $days    = isset( $_GET['days'] ) ? (int) $_GET['days'] : 0;
+        $days    = max( 0, min( 60, $days ) );
+
+        if ( ! $post_id || ! get_post( $post_id ) ) {
+            wp_die( esc_html__( 'Invalid post.', 'wpranklab' ) );
+        }
+
+        // Only allow in dev mode (prevents accidental data pollution on prod sites).
+        $settings = get_option( WPRANKLAB_OPTION_SETTINGS, array() );
+        if ( empty( $settings['dev_mode'] ) ) {
+            wp_die( esc_html__( 'Dev Mode is disabled.', 'wpranklab' ) );
+        }
+
+        $score = get_post_meta( $post_id, '_wpranklab_visibility_score', true );
+        $score = is_numeric( $score ) ? (int) $score : rand( 20, 95 );
+
+        $date = gmdate( 'Y-m-d', time() - ( $days * DAY_IN_SECONDS ) );
+
+        $key     = '_wpranklab_visibility_history';
+        $history = get_post_meta( $post_id, $key, true );
+
+        // Support history stored either as PHP array (preferred) or JSON string (back-compat).
+        if ( is_string( $history ) && '' !== $history ) {
+            $decoded = json_decode( $history, true );
+            if ( is_array( $decoded ) ) {
+                $history = $decoded;
+            }
+        }
+        if ( ! is_array( $history ) ) {
+            $history = array();
+        }
+
+        // Index by date to ensure 1 snapshot per day.
+        $by_date = array();
+        foreach ( $history as $row ) {
+            if ( ! is_array( $row ) ) {
+                continue;
+            }
+            $d = isset( $row['date'] ) ? (string) $row['date'] : '';
+            $s = isset( $row['score'] ) ? (int) $row['score'] : null;
+            if ( '' === $d || null === $s ) {
+                continue;
+            }
+            $by_date[ $d ] = array( 'date' => $d, 'score' => $s );
+        }
+
+        $by_date[ $date ] = array( 'date' => $date, 'score' => $score );
+        ksort( $by_date );
+
+        $history = array_values( $by_date );
+        if ( count( $history ) > 60 ) {
+            $history = array_slice( $history, -60 );
+        }
+
+        update_post_meta( $post_id, $key, $history );
+
+        // Redirect back to editor with a friendly notice flag.
+        $url = add_query_arg(
+            array(
+                'post'                 => $post_id,
+                'action'               => 'edit',
+                'wpranklab_hist_test'   => '1',
+                'wpranklab_hist_days'   => $days,
+            ),
+            admin_url( 'post.php' )
+        );
+        wp_safe_redirect( $url );
+        exit;
     }
 
     /**
@@ -139,6 +225,31 @@ class WPRankLab_Admin {
             'wpranklab_settings_main'
         );
 
+        // Development controls (to reduce API usage during testing).
+        add_settings_field(
+            'wpranklab_dev_mode',
+            __( 'Development Mode (No API Calls)', 'wpranklab' ),
+            array( $this, 'field_dev_mode' ),
+            'wpranklab-settings',
+            'wpranklab_settings_main'
+        );
+
+        add_settings_field(
+            'wpranklab_ai_scan_mode',
+            __( 'AI Scan Mode', 'wpranklab' ),
+            array( $this, 'field_ai_scan_mode' ),
+            'wpranklab-settings',
+            'wpranklab_settings_main'
+        );
+
+        add_settings_field(
+            'wpranklab_ai_cache_minutes',
+            __( 'AI Response Cache (minutes)', 'wpranklab' ),
+            array( $this, 'field_ai_cache_minutes' ),
+            'wpranklab-settings',
+            'wpranklab_settings_main'
+        );
+
         add_settings_field(
             'wpranklab_weekly_email',
             __( 'Weekly Report Emails', 'wpranklab' ),
@@ -167,7 +278,71 @@ class WPRankLab_Admin {
 
         $output['weekly_email'] = isset( $input['weekly_email'] ) ? (int) $input['weekly_email'] : 0;
 
+        // Dev/testing.
+        $output['dev_mode'] = isset( $input['dev_mode'] ) ? (int) $input['dev_mode'] : 0;
+
+        $mode = isset( $input['ai_scan_mode'] ) ? sanitize_text_field( (string) $input['ai_scan_mode'] ) : 'full';
+        if ( ! in_array( $mode, array( 'quick', 'full' ), true ) ) {
+            $mode = 'full';
+        }
+        $output['ai_scan_mode'] = $mode;
+
+        $cache_minutes = isset( $input['ai_cache_minutes'] ) ? (int) $input['ai_cache_minutes'] : 0;
+        if ( $cache_minutes < 0 ) {
+            $cache_minutes = 0;
+        }
+        // Reasonable upper bound (1 week) to avoid accidental "forever" caching.
+        if ( $cache_minutes > 10080 ) {
+            $cache_minutes = 10080;
+        }
+        $output['ai_cache_minutes'] = $cache_minutes;
+
         return $output;
+    }
+
+    /**
+     * Dev Mode field (disables OpenAI calls and uses fixtures).
+     */
+    public function field_dev_mode() {
+        $value = isset( $this->settings['dev_mode'] ) ? (int) $this->settings['dev_mode'] : 0;
+        ?>
+        <label>
+            <input type="checkbox"
+                   id="wpranklab_dev_mode"
+                   name="<?php echo esc_attr( WPRANKLAB_OPTION_SETTINGS ); ?>[dev_mode]"
+                   value="1" <?php checked( 1, $value ); ?> />
+            <?php esc_html_e( 'Enable fixture responses (no OpenAI API calls). Great for UI + storage testing.', 'wpranklab' ); ?>
+        </label>
+        <?php
+    }
+
+    /**
+     * AI Scan Mode field.
+     */
+    public function field_ai_scan_mode() {
+        $value = isset( $this->settings['ai_scan_mode'] ) ? (string) $this->settings['ai_scan_mode'] : 'full';
+        ?>
+        <select id="wpranklab_ai_scan_mode" name="<?php echo esc_attr( WPRANKLAB_OPTION_SETTINGS ); ?>[ai_scan_mode]">
+            <option value="quick" <?php selected( 'quick', $value ); ?>><?php esc_html_e( 'Quick (lower tokens)', 'wpranklab' ); ?></option>
+            <option value="full" <?php selected( 'full', $value ); ?>><?php esc_html_e( 'Full (best quality)', 'wpranklab' ); ?></option>
+        </select>
+        <p class="description"><?php esc_html_e( 'Quick mode reduces max tokens to help avoid rate limits during development.', 'wpranklab' ); ?></p>
+        <?php
+    }
+
+    /**
+     * AI response cache minutes.
+     */
+    public function field_ai_cache_minutes() {
+        $value = isset( $this->settings['ai_cache_minutes'] ) ? (int) $this->settings['ai_cache_minutes'] : 0;
+        ?>
+        <input type="number"
+               id="wpranklab_ai_cache_minutes"
+               name="<?php echo esc_attr( WPRANKLAB_OPTION_SETTINGS ); ?>[ai_cache_minutes]"
+               value="<?php echo esc_attr( $value ); ?>"
+               min="0" max="10080" step="1" style="width:100px;" />
+        <p class="description"><?php esc_html_e( 'Cache identical AI requests for this many minutes (0 disables caching).', 'wpranklab' ); ?></p>
+        <?php
     }
 
     /**
@@ -621,6 +796,62 @@ class WPRankLab_Admin {
         $is_pro   = function_exists( 'wpranklab_is_pro_active' ) && wpranklab_is_pro_active();
         $settings = get_option( WPRANKLAB_OPTION_SETTINGS, array() );
         $has_key  = ! empty( $settings['openai_api_key'] );
+        $is_dev_mode = ! empty( $settings['dev_mode'] );
+
+        // Per-post score history for weekly trend + deltas.
+        $history_raw = get_post_meta( $post->ID, '_wpranklab_visibility_history', true );
+        $history     = array();
+        if ( is_array( $history_raw ) ) {
+            $history = $history_raw;
+        } elseif ( is_string( $history_raw ) && '' !== $history_raw ) {
+            // Back-compat if stored as JSON string.
+            $decoded = json_decode( $history_raw, true );
+            if ( is_array( $decoded ) ) {
+                $history = $decoded;
+            }
+        }
+
+        // Normalize and sort by date ASC.
+        $by_date = array();
+        foreach ( (array) $history as $row ) {
+            if ( ! is_array( $row ) ) {
+                continue;
+            }
+            $d = isset( $row['date'] ) ? (string) $row['date'] : '';
+            $s = isset( $row['score'] ) ? (int) $row['score'] : null;
+            if ( '' === $d || null === $s ) {
+                continue;
+            }
+            $by_date[ $d ] = array( 'date' => $d, 'score' => $s );
+        }
+        ksort( $by_date );
+        $history = array_values( $by_date );
+
+        // Compute deltas.
+        $delta_last = null;
+        $delta_week = null;
+        if ( count( $history ) >= 2 ) {
+            $last = $history[ count( $history ) - 1 ];
+            $prev = $history[ count( $history ) - 2 ];
+            $delta_last = (int) $last['score'] - (int) $prev['score'];
+
+            // Find closest snapshot at least 7 days older than last.
+            $last_date_ts = strtotime( $last['date'] . ' 00:00:00' );
+            $cutoff_ts    = $last_date_ts ? ( $last_date_ts - ( 7 * DAY_IN_SECONDS ) ) : null;
+            if ( $cutoff_ts ) {
+                $candidate = null;
+                foreach ( $history as $row ) {
+                    $ts = strtotime( $row['date'] . ' 00:00:00' );
+                    if ( $ts && $ts <= $cutoff_ts ) {
+                        $candidate = $row;
+                    }
+                }
+                if ( $candidate ) {
+                    $delta_week = (int) $last['score'] - (int) $candidate['score'];
+                }
+            }
+        }
+
 
         // Messages from actions.
         $ai_msg = '';
@@ -680,6 +911,80 @@ class WPRankLab_Admin {
                     <?php esc_html_e( 'No AI Visibility scan has been run yet. Click "Update" or use the button below to analyze this content.', 'wpranklab' ); ?>
                 </p>
             <?php endif; ?>
+
+            <?php if ( $is_dev_mode ) : ?>
+                <?php
+                $base = admin_url( 'admin-post.php' );
+                $u7  = add_query_arg( array( 'action' => 'wpranklab_add_test_snapshot', 'post_id' => $post->ID, 'days' => 7 ), $base );
+                $u14 = add_query_arg( array( 'action' => 'wpranklab_add_test_snapshot', 'post_id' => $post->ID, 'days' => 14 ), $base );
+                $u0  = add_query_arg( array( 'action' => 'wpranklab_add_test_snapshot', 'post_id' => $post->ID, 'days' => 0 ), $base );
+                $u7  = wp_nonce_url( $u7, 'wpranklab_add_test_snapshot' );
+                $u14 = wp_nonce_url( $u14, 'wpranklab_add_test_snapshot' );
+                $u0  = wp_nonce_url( $u0, 'wpranklab_add_test_snapshot' );
+                ?>
+                <div style="margin:8px 0 10px;padding:8px;border:1px dashed #c3c4c7;background:#f6f7f7;">
+                    <div style="font-weight:600;margin:0 0 6px;"><?php esc_html_e( 'Dev tools', 'wpranklab' ); ?></div>
+                    <div style="font-size:12px;line-height:1.6;">
+                        <a class="button button-small" href="<?php echo esc_url( $u7 ); ?>"><?php esc_html_e( 'Add snapshot (7d ago)', 'wpranklab' ); ?></a>
+                        <a class="button button-small" href="<?php echo esc_url( $u14 ); ?>" style="margin-left:6px;"><?php esc_html_e( 'Add snapshot (14d ago)', 'wpranklab' ); ?></a>
+                        <a class="button button-small" href="<?php echo esc_url( $u0 ); ?>" style="margin-left:6px;"><?php esc_html_e( 'Add snapshot (today)', 'wpranklab' ); ?></a>
+                        <div style="margin-top:6px;color:#646970;">
+                            <?php esc_html_e( 'Creates history entries without calling OpenAI (for testing weekly deltas).', 'wpranklab' ); ?>
+                        </div>
+                    </div>
+                </div>
+            <?php endif; ?>
+
+            <?php if ( isset( $_GET['wpranklab_hist_test'] ) && '1' === (string) $_GET['wpranklab_hist_test'] ) : ?>
+                <div class="notice notice-success" style="margin:8px 0 10px;">
+                    <p>
+                        <?php
+                        $days = isset( $_GET['wpranklab_hist_days'] ) ? (int) $_GET['wpranklab_hist_days'] : 0;
+                        printf( esc_html__( 'Test snapshot added (%d day(s) back).', 'wpranklab' ), $days );
+                        ?>
+                    </p>
+                </div>
+            <?php endif; ?>
+
+            <?php if ( ! empty( $history ) ) : ?>
+                <div class="wpranklab-history-box" style="margin:8px 0 10px;padding:8px;border:1px solid #dcdcde;background:#fff;">
+                    <div style="font-weight:600;margin:0 0 6px;"><?php esc_html_e( 'Score change', 'wpranklab' ); ?></div>
+
+                    <div style="font-size:12px;line-height:1.4;">
+                        <?php if ( null !== $delta_last ) : ?>
+                            <div>
+                                <?php
+                                $sign = $delta_last > 0 ? '+' : '';
+                                printf( esc_html__( 'Since last scan: %s%d', 'wpranklab' ), esc_html( $sign ), (int) $delta_last );
+                                ?>
+                            </div>
+                        <?php endif; ?>
+
+                        <?php if ( null !== $delta_week ) : ?>
+                            <div>
+                                <?php
+                                $sign = $delta_week > 0 ? '+' : '';
+                                printf( esc_html__( 'Vs 7+ days ago: %s%d', 'wpranklab' ), esc_html( $sign ), (int) $delta_week );
+                                ?>
+                            </div>
+                        <?php endif; ?>
+
+                        <details style="margin-top:6px;">
+                            <summary style="cursor:pointer;"><?php esc_html_e( 'History (latest)', 'wpranklab' ); ?></summary>
+                            <ul style="margin:6px 0 0 18px;">
+                                <?php
+                                $slice = array_slice( $history, -6 );
+                                $slice = array_reverse( $slice );
+                                foreach ( $slice as $row ) {
+                                    printf( '<li>%s — <strong>%d</strong></li>', esc_html( $row['date'] ), (int) $row['score'] );
+                                }
+                                ?>
+                            </ul>
+                        </details>
+                    </div>
+                </div>
+            <?php endif; ?>
+
 
             <?php if ( ! empty( $metrics ) ) : ?>
                 <details class="wpranklab-metrics">

@@ -37,6 +37,35 @@ class WPRankLab_AI {
         $settings = get_option( WPRANKLAB_OPTION_SETTINGS, array() );
         return isset( $settings['openai_api_key'] ) ? trim( (string) $settings['openai_api_key'] ) : '';
     }
+
+    /**
+     * Dev Mode: when enabled, NEVER call OpenAI.
+     * Useful for UI + postmeta testing without burning tokens.
+     *
+     * @return bool
+     */
+    protected function is_dev_mode() {
+        $settings = get_option( WPRANKLAB_OPTION_SETTINGS, array() );
+        return ! empty( $settings['dev_mode'] );
+    }
+
+    /**
+     * @return string 'quick'|'full'
+     */
+    protected function get_scan_mode() {
+        $settings = get_option( WPRANKLAB_OPTION_SETTINGS, array() );
+        $mode = isset( $settings['ai_scan_mode'] ) ? (string) $settings['ai_scan_mode'] : 'full';
+        return in_array( $mode, array( 'quick', 'full' ), true ) ? $mode : 'full';
+    }
+
+    /**
+     * @return int cache TTL in minutes (0 disables caching)
+     */
+    protected function get_cache_minutes() {
+        $settings = get_option( WPRANKLAB_OPTION_SETTINGS, array() );
+        $m = isset( $settings['ai_cache_minutes'] ) ? (int) $settings['ai_cache_minutes'] : 0;
+        return max( 0, $m );
+    }
     
     /**
      * Check whether AI generation is available (API key present).
@@ -249,6 +278,22 @@ class WPRankLab_AI {
      * @return string|WP_Error
      */
     protected function call_chat_api( $prompt ) {
+        // Dev Mode: return deterministic fixtures and skip the network.
+        if ( $this->is_dev_mode() ) {
+            return $this->fixture_for_prompt( (string) $prompt );
+        }
+
+        // Cache identical prompts to reduce accidental token burn.
+        $cache_minutes = $this->get_cache_minutes();
+        $scan_mode     = $this->get_scan_mode();
+        if ( $cache_minutes > 0 ) {
+            $key = 'wpranklab_ai_' . md5( $scan_mode . '|' . (string) $prompt );
+            $hit = get_transient( $key );
+            if ( is_string( $hit ) && '' !== $hit ) {
+                return $hit;
+            }
+        }
+
         $api_key = $this->get_api_key();
         if ( '' === $api_key ) {
             return new WP_Error( 'wpranklab_ai_no_key', __( 'OpenAI API key is not configured.', 'wpranklab' ) );
@@ -256,6 +301,11 @@ class WPRankLab_AI {
         
         $endpoint = 'https://api.openai.com/v1/chat/completions';
         
+        // Token-saver defaults for development.
+        $scan_mode   = $this->get_scan_mode();
+        $max_tokens  = ( 'quick' === $scan_mode ) ? 250 : 700;
+        $temperature = ( 'quick' === $scan_mode ) ? 0.3 : 0.6;
+
         $body = array(
             'model'    => 'gpt-4.1-mini',
             'messages' => array(
@@ -268,8 +318,8 @@ class WPRankLab_AI {
                     'content' => $prompt,
                 ),
             ),
-            'temperature' => 0.6,
-            'max_tokens'  => 700,
+            'temperature' => $temperature,
+            'max_tokens'  => $max_tokens,
         );
         
         $args = array(
@@ -323,9 +373,51 @@ class WPRankLab_AI {
         }
         
         $text = trim( (string) $data['choices'][0]['message']['content'] );
+
+        // Save to cache if enabled.
+        if ( isset( $key ) && $cache_minutes > 0 ) {
+            set_transient( $key, $text, $cache_minutes * MINUTE_IN_SECONDS );
+        }
         
         return $text;
         
+    }
+
+    /**
+     * Generate a fixture response for a given prompt.
+     *
+     * @param string $prompt
+     * @return string
+     */
+    protected function fixture_for_prompt( $prompt ) {
+        $p = strtolower( $prompt );
+
+        // Missing topics JSON fixture.
+        if ( false !== strpos( $p, '"missing_topics"' ) || false !== strpos( $p, 'missing_topics' ) ) {
+            return wp_json_encode(
+                array(
+                    'missing_topics' => array(
+                        array( 'topic' => 'Pricing / cost breakdown', 'reason' => 'Users often ask cost-related questions.', 'priority' => 'high' ),
+                        array( 'topic' => 'Step-by-step usage', 'reason' => 'Explicit steps improve clarity for assistants.', 'priority' => 'medium' ),
+                        array( 'topic' => 'Common mistakes', 'reason' => 'Addresses frequent confusion points.', 'priority' => 'medium' ),
+                        array( 'topic' => 'Alternatives & comparisons', 'reason' => 'Helps answer “vs” queries.', 'priority' => 'low' ),
+                    ),
+                    'suggested_questions' => array(
+                        'What is this used for?',
+                        'How do I set it up?',
+                        'How much does it cost?',
+                    ),
+                )
+            );
+        }
+
+        // QA block fixture.
+        if ( false !== strpos( $p, 'format your response exactly like this' ) || false !== strpos( $p, 'q:' ) ) {
+            return "Q: What is this page about?\nA: It explains the topic in a clear, structured way.\nQ: Who is it for?\nA: Readers looking for practical guidance and quick answers.\nQ: What are the key takeaways?\nA: The main points, steps, and common questions are covered.";
+        }
+
+        // Default: short summary fixture.
+        return 'Fixture Mode: This is a placeholder AI response so you can test the UI, storage, and workflows without making any OpenAI API calls.';
     }
     
     /**

@@ -120,6 +120,10 @@ class WPRankLab_Analyzer {
         update_post_meta( $post_id, '_wpranklab_visibility_score', $score );
         update_post_meta( $post_id, '_wpranklab_visibility_last_run', current_time( 'mysql' ) );
         update_post_meta( $post_id, '_wpranklab_visibility_data', $metrics );
+
+        // Maintain per-post score history for the weekly trend + delta UI.
+        // Stored as an array of {date: Y-m-d, score: int}.
+        $this->append_visibility_history( $post_id, (int) $score, current_time( 'Y-m-d' ) );
         
         // Pro-only: entity extraction & graph base layer.
         if ( class_exists( 'WPRankLab_Entities' ) && function_exists( 'wpranklab_is_pro_active' ) && wpranklab_is_pro_active() ) {
@@ -138,6 +142,65 @@ class WPRankLab_Analyzer {
         
         return $metrics;
     }
+
+    /**
+     * Append (or replace) a per-post daily score snapshot.
+     * Stored in postmeta key _wpranklab_visibility_history.
+     *
+     * @param int    $post_id Post ID.
+     * @param int    $score   Score 0-100.
+     * @param string $date    Date in Y-m-d.
+     */
+    protected function append_visibility_history( $post_id, $score, $date ) {
+        $post_id = (int) $post_id;
+        $score   = (int) $score;
+        $date    = (string) $date;
+
+        if ( $post_id <= 0 || '' === $date ) {
+            return;
+        }
+
+        $key = '_wpranklab_visibility_history';
+        $raw = get_post_meta( $post_id, $key, true );
+
+        // WordPress may return an unserialized array, or a JSON string in some edge cases.
+        $history = array();
+        if ( is_array( $raw ) ) {
+            $history = $raw;
+        } elseif ( is_string( $raw ) && '' !== $raw ) {
+            $decoded = json_decode( $raw, true );
+            if ( is_array( $decoded ) ) {
+                $history = $decoded;
+            }
+        }
+
+        // Reindex by date so we keep 1 entry per day.
+        $by_date = array();
+        foreach ( (array) $history as $row ) {
+            if ( ! is_array( $row ) ) {
+                continue;
+            }
+            $d = isset( $row['date'] ) ? (string) $row['date'] : '';
+            $s = isset( $row['score'] ) ? (int) $row['score'] : null;
+            if ( '' === $d || null === $s ) {
+                continue;
+            }
+            $by_date[ $d ] = array( 'date' => $d, 'score' => $s );
+        }
+
+        $by_date[ $date ] = array( 'date' => $date, 'score' => $score );
+
+        ksort( $by_date );
+        $history = array_values( $by_date );
+
+        // Keep last 60 entries.
+        if ( count( $history ) > 60 ) {
+            $history = array_slice( $history, -60 );
+        }
+
+        update_post_meta( $post_id, $key, $history );
+    }
+
     
     /**
      * Count internal links in HTML content.
