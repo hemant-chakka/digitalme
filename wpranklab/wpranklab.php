@@ -104,7 +104,7 @@ wpranklab_run();
 function wpranklab_is_pro_active() {
     
     return true;
-    // Use real license manager.
+    // Pro is enabled only via a valid license (Free users do not need a key).
     if ( class_exists( 'WPRankLab_License_Manager' ) ) {
         $license_manager = WPRankLab_License_Manager::get_instance();
         return $license_manager->is_pro_active();

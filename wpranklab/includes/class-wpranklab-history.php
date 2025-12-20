@@ -163,23 +163,20 @@ class WPRankLab_History {
      *
      * @return array
      */
-    public function get_recent_snapshots( $limit = 4 ) {
+    public function get_recent_snapshots( $limit = null ) {
         global $wpdb;
 
         $history_table = $wpdb->prefix . 'wpranklab_history';
 
-        $limit = (int) $limit;
-        if ( $limit <= 0 ) {
-            $limit = 4;
-        }
-
-        $sql = $wpdb->prepare(
-            "SELECT snapshot_date, avg_score, scanned_count
+        $sql = "SELECT snapshot_date, avg_score, scanned_count
              FROM {$history_table}
-             ORDER BY snapshot_date DESC
-             LIMIT %d",
-            $limit
-        );
+             ORDER BY snapshot_date DESC";
+
+        // Apply LIMIT only when explicitly requested (> 0). null/0 means unlimited.
+        if ( is_int( $limit ) && $limit > 0 ) {
+            // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+            $sql .= $wpdb->prepare( ' LIMIT %d', $limit );
+        }
 
         $rows = $wpdb->get_results( $sql, ARRAY_A ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
 

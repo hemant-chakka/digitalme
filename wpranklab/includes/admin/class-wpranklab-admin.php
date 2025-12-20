@@ -69,6 +69,13 @@ class WPRankLab_Admin {
 
         // Dev helper: add backdated score snapshots for testing weekly deltas (no OpenAI calls).
         add_action( 'admin_post_wpranklab_add_test_snapshot', array( $this, 'handle_add_test_snapshot' ) );
+        
+        add_action( 'wp_ajax_wpranklab_show_license_form', function () {
+            check_ajax_referer( 'wpranklab_license_nonce' );
+            update_option( 'wpranklab_show_license_form', 1 );
+            wp_send_json_success();
+        });
+            
 
     }
 
@@ -508,12 +515,33 @@ class WPRankLab_Admin {
             <?php
             if ( class_exists( 'WPRankLab_History' ) ) {
                 $history = WPRankLab_History::get_instance();
-                $rows    = $history->get_recent_snapshots( 4 );
+                
+                $is_pro = function_exists( 'wpranklab_is_pro_active' ) && wpranklab_is_pro_active();
+                
+                // Free: fetch extra rows so we can show a locked teaser.
+                // Pro: fetch unlimited.
+                $rows = $is_pro
+                ? $history->get_recent_snapshots()     // unlimited
+                : $history->get_recent_snapshots(12);  // fetch more than 4 so teaser exists
             } else {
-                $rows = array();
+                $rows   = array();
+                $is_pro = false;
             }
+            
 
-            if ( ! empty( $rows ) ) : ?>
+            if ( ! empty( $rows ) ) : 
+            
+            $visible_rows = $is_pro ? $rows : array_slice( $rows, 0, 4 );
+            
+            // show up to 4 locked rows as teaser
+            $locked_rows  = $is_pro ? array() : array_slice( $rows, 4, 4 );
+            
+            
+            
+            ?>
+            
+            
+            
                 <table class="widefat striped" style="max-width: 600px;">
                     <thead>
                         <tr>
@@ -523,7 +551,8 @@ class WPRankLab_Admin {
                         </tr>
                     </thead>
                     <tbody>
-                        <?php foreach ( $rows as $row ) : ?>
+                        <?php foreach ( $visible_rows as $row ) : ?>
+
                             <tr>
                                 <td><?php echo esc_html( $row['snapshot_date'] ); ?></td>
                                 <td>
@@ -538,6 +567,48 @@ class WPRankLab_Admin {
                         <?php endforeach; ?>
                     </tbody>
                 </table>
+                
+                <?php if ( ! $is_pro && ! empty( $locked_rows ) ) : ?>
+    <div class="wpranklab-locked-history" style="position:relative; max-width:600px; margin-top:12px;">
+        <div style="filter: blur(2.5px); pointer-events:none; user-select:none;">
+            <table class="widefat striped">
+                <thead>
+                    <tr>
+                        <th><?php esc_html_e( 'Date', 'wpranklab' ); ?></th>
+                        <th><?php esc_html_e( 'Avg Score', 'wpranklab' ); ?></th>
+                        <th><?php esc_html_e( 'Scanned Items', 'wpranklab' ); ?></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ( $locked_rows as $row ) : ?>
+                        <tr>
+                            <td><?php echo esc_html( $row['snapshot_date'] ); ?></td>
+                            <td>
+                                <?php
+                                echo is_null( $row['avg_score'] )
+                                    ? esc_html__( 'N/A', 'wpranklab' )
+                                    : esc_html( round( $row['avg_score'], 1 ) );
+                                ?>
+                            </td>
+                            <td><?php echo (int) $row['scanned_count']; ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="wpranklab-locked-overlay"
+             style="position:absolute; inset:0; background:rgba(255,255,255,.86); display:flex; align-items:center; justify-content:center; flex-direction:column; gap:8px;">
+            <p style="margin:0;"><strong><?php esc_html_e( 'Upgrade to Pro to unlock full history', 'wpranklab' ); ?></strong></p>
+            <a class="button button-primary" href="<?php echo esc_url( admin_url( 'admin.php?page=wpranklab-upgrade' ) ); ?>">
+                <?php esc_html_e( 'Upgrade to Pro', 'wpranklab' ); ?>
+            </a>
+        </div>
+    </div>
+<?php endif; ?>
+                
+                
+                
             <?php else : ?>
                 <p><?php esc_html_e( 'No history available yet. The weekly snapshot will be recorded automatically, or you can trigger a site-wide scan to collect scores.', 'wpranklab' ); ?></p>
             <?php endif; ?>
@@ -561,7 +632,7 @@ class WPRankLab_Admin {
                 ?>
             </form>
         </div>
-        <?php
+        <?php 
     }
 
     /**
@@ -570,6 +641,8 @@ class WPRankLab_Admin {
     public function render_license_page() {
         $this->license = get_option( WPRANKLAB_OPTION_LICENSE, array() );
         $status = isset( $this->license['status'] ) ? $this->license['status'] : 'inactive';
+        $has_key   = ! empty( $this->license['license_key'] );
+        $show_form = isset( $_GET['wpranklab_show_license_form'] ) && '1' === (string) sanitize_text_field( wp_unslash( $_GET['wpranklab_show_license_form'] ) );
         ?>
         <div class="wrap wpranklab-wrap">
             <h1><?php esc_html_e( 'WPRankLab License', 'wpranklab' ); ?></h1>
@@ -641,13 +714,48 @@ class WPRankLab_Admin {
             }
             ?>
 
-            <p><?php esc_html_e( 'Enter your license key to activate WPRankLab Pro features.', 'wpranklab' ); ?></p>
+            <?php if ( ! $has_key && ! $show_form ) : ?>
+                <p><?php esc_html_e( 'You are on the Free plan. Free does not require a license key (Yoast-style).', 'wpranklab' ); ?></p>
+                <p>
+                    <a class="button button-primary" href="<?php echo esc_url( admin_url( 'admin.php?page=wpranklab-upgrade' ) ); ?>">
+                        <?php esc_html_e( 'Upgrade to Pro', 'wpranklab' ); ?>
+                    </a>
+                    <a class="button" href="<?php echo esc_url( add_query_arg( array( 'page' => 'wpranklab-license', 'wpranklab_show_license_form' => '1' ), admin_url( 'admin.php' ) ) ); ?>" style="margin-left:8px;">
+                        <?php esc_html_e( 'I have a license key', 'wpranklab' ); ?>
+                    </a>
+                </p>
+            <?php else : ?>
+                <p><?php esc_html_e( 'Enter your license key to activate WPRankLab Pro features.', 'wpranklab' ); ?></p>
+            <?php endif; ?>
 
             <form method="post" action="options.php">
                 <?php
                 settings_fields( 'wpranklab_license_group' );
                 ?>
                 <table class="form-table">
+                    
+                   
+                  <?php  if ( ! wpranklab_should_show_license_form() ) : ?>
+    <p>
+        <?php esc_html_e( 'You are using the Free version of WPRankLab.', 'wpranklab' ); ?>
+    </p>
+
+    <p>
+        <a href="https://your-upgrade-url"
+           class="button button-primary">
+            <?php esc_html_e( 'Upgrade to Pro', 'wpranklab' ); ?>
+        </a>
+
+        <button type="button"
+                class="button"
+                id="wpranklab-show-license-form">
+            <?php esc_html_e( 'I already have a license key', 'wpranklab' ); ?>
+        </button>
+    </p>
+<?php endif; ?>
+                   
+                   
+                   <?php if ( wpranklab_should_show_license_form() ) : ?> 
                     <tr>
                         <th scope="row">
                             <label for="wpranklab_license_key"><?php esc_html_e( 'License Key', 'wpranklab' ); ?></label>
@@ -655,7 +763,7 @@ class WPRankLab_Admin {
                         <td>
                             <input type="text"
                                    id="wpranklab_license_key"
-                                   name="<?php echo esc_attr( WPRANKLAB_OPTION_LICENSE ); ?>[license_key]; ?>"
+                                   name="<?php echo esc_attr( WPRANKLAB_OPTION_LICENSE ); ?>[license_key]"
                                    value="<?php echo isset( $this->license['license_key'] ) ? esc_attr( $this->license['license_key'] ) : ''; ?>"
                                    class="regular-text" />
                             <?php if ( ! empty( $status ) ) : ?>
@@ -670,6 +778,10 @@ class WPRankLab_Admin {
                             <?php endif; ?>
                         </td>
                     </tr>
+                    
+                    <?php endif; ?>
+                
+                
                 </table>
 
                 <?php submit_button( __( 'Save License', 'wpranklab' ) ); ?>
@@ -683,7 +795,67 @@ class WPRankLab_Admin {
 
             <p><em><?php esc_html_e( 'License validation uses the configured license server endpoint. Pro features are only available while the license is active and not kill-switched.', 'wpranklab' ); ?></em></p>
         </div>
-        <?php
+    
+    <?php // --- WPRankLab: reveal license form (Yoast-style) --- ?>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const btn = document.getElementById('wpranklab-show-license-form');
+    if (!btn) return;
+
+    btn.addEventListener('click', function () {
+        const data = new URLSearchParams();
+        data.append('action', 'wpranklab_show_license_form');
+        data.append('_wpnonce', '<?php echo wp_create_nonce('wpranklab_license_nonce'); ?>');
+
+        fetch(ajaxurl, {
+            method: 'POST',
+            credentials: 'same-origin',
+            body: data
+        }).then(() => {
+            window.location.reload();
+        });
+    });
+});
+</script>
+<?php
+// --- end reveal license form ---
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+       
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
     }
 
     /**
@@ -2053,6 +2225,12 @@ if ( ! $is_pro ) {
     }
     
 
+}
 
-
+function wpranklab_should_show_license_form() {
+    if ( wpranklab_is_pro_active() ) {
+        return true;
+    }
+    
+    return (bool) get_option( 'wpranklab_show_license_form', false );
 }

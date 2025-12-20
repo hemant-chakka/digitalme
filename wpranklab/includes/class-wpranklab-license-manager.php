@@ -53,7 +53,73 @@ class WPRankLab_License_Manager {
         add_action( 'wpranklab_daily_license_check', array( $this, 'cron_daily_check' ) );
 
         // Maybe show admin notices.
-        add_action( 'admin_notices', array( $this, 'maybe_show_license_notice' ) );
+        add_action( 'admin_notices', array( $this, 'maybe_show_license_notice' ), 1 );
+
+        // Best-effort hardening: make the kill-switch notice difficult to hide.
+        add_action( 'admin_head', array( $this, 'output_kill_switch_notice_styles' ) );
+        add_action( 'admin_footer', array( $this, 'output_kill_switch_notice_watchdog' ) );
+    }
+
+    /**
+     * Output admin CSS that helps keep the kill-switch notice visible.
+     */
+    public function output_kill_switch_notice_styles() {
+        if ( ! current_user_can( 'manage_options' ) ) {
+            return;
+        }
+
+        $license = $this->license;
+        $status  = isset( $license['status'] ) ? $license['status'] : 'inactive';
+        $kill    = ! empty( $license['kill_switch_active'] );
+
+        if ( empty( $license['license_key'] ) || ( ! $kill && ! in_array( $status, array( 'expired', 'invalid', 'blocked' ), true ) ) ) {
+            return;
+        }
+        ?>
+        <style>
+            .wpranklab-license-notice{display:block !important;padding:14px 18px;border-left-width:6px;}
+            .wpranklab-license-notice p{font-size:14px;line-height:1.4;}
+        </style>
+        <?php
+    }
+
+    /**
+     * JS watchdog: if the kill-switch notice is removed from DOM, re-insert a minimal one.
+     * (Best-effort; can't fully prevent malicious admin CSS/JS.)
+     */
+    public function output_kill_switch_notice_watchdog() {
+        if ( ! current_user_can( 'manage_options' ) ) {
+            return;
+        }
+
+        $license = $this->license;
+        $status  = isset( $license['status'] ) ? $license['status'] : 'inactive';
+        $kill    = ! empty( $license['kill_switch_active'] );
+
+        if ( empty( $license['license_key'] ) || ( ! $kill && ! in_array( $status, array( 'expired', 'invalid', 'blocked' ), true ) ) ) {
+            return;
+        }
+
+        $msg = $kill
+            ? __( 'WPRankLab Pro has been kill-switched by the license server. All Pro functionality is disabled.', 'wpranklab' )
+            : __( 'WPRankLab Pro is disabled due to an invalid/expired license.', 'wpranklab' );
+        $link = admin_url( 'admin.php?page=wpranklab-license' );
+        ?>
+        <script>
+        (function(){
+            function ensureNotice(){
+                if (document.querySelector('.wpranklab-license-notice')) return;
+                var wrap = document.querySelector('.wrap') || document.body;
+                var div = document.createElement('div');
+                div.className = 'notice notice-error wpranklab-license-notice';
+                div.innerHTML = '<p><strong><?php echo esc_js( $msg ); ?></strong></p><p><a class="button button-primary" href="<?php echo esc_js( $link ); ?>"><?php echo esc_js( __( 'Manage WPRankLab License', 'wpranklab' ) ); ?></a></p>';
+                wrap.parentNode.insertBefore(div, wrap);
+            }
+            setTimeout(ensureNotice, 250);
+            setTimeout(ensureNotice, 1500);
+        })();
+        </script>
+        <?php
     }
 
     /**
