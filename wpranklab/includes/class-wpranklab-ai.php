@@ -84,6 +84,12 @@ class WPRankLab_AI {
      * @return string|WP_Error
      */
     public function generate_summary_for_post( $post_id ) {
+        
+        if ( ! wpranklab_is_pro_active() ) {
+            return new WP_Error( 'pro_required', __( 'This is a Pro feature.', 'wpranklab' ) );
+        }
+        
+        
         $post = get_post( $post_id );
         if ( ! $post ) {
             return new WP_Error( 'wpranklab_ai_no_post', __( 'Post not found.', 'wpranklab' ) );
@@ -116,6 +122,12 @@ class WPRankLab_AI {
      * @return string|WP_Error
      */
     public function generate_qa_for_post( $post_id ) {
+        
+        if ( ! wpranklab_is_pro_active() ) {
+            return new WP_Error( 'pro_required', __( 'This is a Pro feature.', 'wpranklab' ) );
+        }
+        
+        
         $post = get_post( $post_id );
         if ( ! $post ) {
             return new WP_Error( 'wpranklab_ai_no_post', __( 'Post not found.', 'wpranklab' ) );
@@ -155,6 +167,12 @@ class WPRankLab_AI {
      * @return array|WP_Error
      */
     public function generate_missing_topics_for_post( $post_id, $entities_for_post = array() ) {
+        
+        if ( ! wpranklab_is_pro_active() ) {
+            return new WP_Error( 'pro_required', __( 'This is a Pro feature.', 'wpranklab' ) );
+        }
+        
+        
         
         $post = get_post( $post_id );
         if ( ! $post ) {

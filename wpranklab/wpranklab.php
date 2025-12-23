@@ -113,3 +113,24 @@ function wpranklab_is_pro_active() {
     return false;
 }
 
+/**
+ * Hard block Pro-only entry points.
+ * - AJAX: returns JSON 403
+ * - Non-AJAX: wp_die 403
+ */
+function wpranklab_require_pro() {
+    if ( wpranklab_is_pro_active() ) {
+        return;
+    }
+    
+    if ( wp_doing_ajax() ) {
+        wp_send_json_error(
+            array( 'message' => __( 'This is a Pro feature.', 'wpranklab' ) ),
+            403
+            );
+    }
+    
+    wp_die( esc_html__( 'This is a Pro feature.', 'wpranklab' ), 403 );
+}
+
+

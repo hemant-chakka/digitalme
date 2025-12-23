@@ -1762,6 +1762,8 @@ if ( ! $is_pro ) {
      * Handle AI summary generation.
      */
     public function handle_generate_summary() {
+        wpranklab_require_pro();
+        
         if ( ! current_user_can( 'edit_posts' ) ) {
             wp_die( esc_html__( 'You are not allowed to do this.', 'wpranklab' ) );
         }
@@ -1816,6 +1818,8 @@ if ( ! $is_pro ) {
      * Handle AI Q&A generation.
      */
     public function handle_generate_qa() {
+        wpranklab_require_pro();
+        
         if ( ! current_user_can( 'edit_posts' ) ) {
             wp_die( esc_html__( 'You are not allowed to do this.', 'wpranklab' ) );
         }
@@ -1869,6 +1873,9 @@ if ( ! $is_pro ) {
      * Insert AI summary into post content (append at bottom).
      */
     public function handle_insert_summary() {
+        
+        wpranklab_require_pro();
+        
         if ( ! current_user_can( 'edit_posts' ) ) {
             wp_die( esc_html__( 'You are not allowed to do this.', 'wpranklab' ) );
         }
@@ -1908,6 +1915,9 @@ if ( ! $is_pro ) {
      * Insert AI Q&A block into post content (append at bottom).
      */
     public function handle_insert_qa() {
+        
+        wpranklab_require_pro();
+        
         if ( ! current_user_can( 'edit_posts' ) ) {
             wp_die( esc_html__( 'You are not allowed to do this.', 'wpranklab' ) );
         }
@@ -1947,6 +1957,9 @@ if ( ! $is_pro ) {
      * Insert a missing topic as an H2 section (Pro).
      */
     public function handle_insert_missing_topic() {
+        
+        wpranklab_require_pro();
+        
         
         if ( ! function_exists( 'wpranklab_is_pro_active' ) || ! wpranklab_is_pro_active() ) {
             wp_die( esc_html__( 'Pro license required.', 'wpranklab' ) );
@@ -2014,6 +2027,8 @@ if ( ! $is_pro ) {
      * AJAX: Generate missing-topic section HTML (for cursor insertion in Block Editor).
      */
     public function ajax_missing_topic_section() {
+
+        wpranklab_require_pro();
         
         if ( ! current_user_can( 'edit_posts' ) ) {
             wp_send_json_error( array( 'message' => 'Not allowed.' ), 403 );
