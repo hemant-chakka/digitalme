@@ -75,6 +75,9 @@ class WPRankLab_Admin {
             update_option( 'wpranklab_show_license_form', 1 );
             wp_send_json_success();
         });
+        
+        add_action( 'admin_post_wpranklab_cancel_batch_scan', array( $this, 'handle_cancel_batch_scan' ) );
+            
             
 
     }
@@ -479,29 +482,28 @@ class WPRankLab_Admin {
 if ( class_exists( 'WPRankLab_Batch_Scan' ) ) {
     $state = WPRankLab_Batch_Scan::get_instance()->get_state();
 
-    if ( isset( $_GET['wpranklab_batch'] ) && 'started' === $_GET['wpranklab_batch'] ) : ?>
-        <div class="notice notice-success is-dismissible">
-            <p><?php esc_html_e( 'Batch scan started. It will run in the background via WP-Cron.', 'wpranklab' ); ?></p>
-        </div>
-    <?php endif;
+    if ( isset( $_GET['wpranklab_batch'] ) && 'started' === $_GET['wpranklab_batch'] ) {
+        echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__( 'Batch scan started.', 'wpranklab' ) . '</p></div>';
+    } elseif ( isset( $_GET['wpranklab_batch'] ) && 'cancelled' === $_GET['wpranklab_batch'] ) {
+        echo '<div class="notice notice-warning is-dismissible"><p>' . esc_html__( 'Batch scan cancelled.', 'wpranklab' ) . '</p></div>';
+    }
 
-    if ( 'running' === $state['status'] && $state['total'] > 0 ) : ?>
-        <div class="notice notice-info">
-            <p>
-                <?php
-                printf(
-                    esc_html__( 'Batch scan running: %1$d / %2$d scanned', 'wpranklab' ),
-                    (int) $state['progress'],
-                    (int) $state['total']
-                );
-                ?>
-            </p>
-        </div>
-    <?php elseif ( 'complete' === $state['status'] ) : ?>
-        <div class="notice notice-success is-dismissible">
-            <p><?php esc_html_e( 'Batch scan complete.', 'wpranklab' ); ?></p>
-        </div>
-    <?php endif;
+    if ( 'running' === $state['status'] && $state['total'] > 0 ) {
+        echo '<div class="notice notice-info"><p>' .
+            esc_html( sprintf( 'Batch scan running: %d / %d scanned', (int) $state['progress'], (int) $state['total'] ) ) .
+            '</p></div>';
+
+        // Cancel button
+        ?>
+        <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="margin: 10px 0 20px;">
+            <?php wp_nonce_field( 'wpranklab_cancel_batch_scan' ); ?>
+            <input type="hidden" name="action" value="wpranklab_cancel_batch_scan" />
+            <?php submit_button( __( 'Cancel Batch Scan', 'wpranklab' ), 'secondary', 'wpranklab_cancel_batch_btn', false ); ?>
+        </form>
+        <?php
+    } elseif ( 'complete' === $state['status'] ) {
+        echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__( 'Batch scan complete.', 'wpranklab' ) . '</p></div>';
+    }
 }
 ?>
             
@@ -2276,6 +2278,18 @@ if ( ! $is_pro ) {
                 . '</p></div>';
         }
     }
+    
+    public function handle_cancel_batch_scan() {
+        check_admin_referer( 'wpranklab_cancel_batch_scan' );
+        
+        if ( class_exists( 'WPRankLab_Batch_Scan' ) ) {
+            WPRankLab_Batch_Scan::get_instance()->cancel_scan();
+        }
+        
+        wp_safe_redirect( admin_url( 'admin.php?page=wpranklab&wpranklab_batch=cancelled' ) );
+        exit;
+    }
+    
     
 
 }
