@@ -474,6 +474,37 @@ class WPRankLab_Admin {
         ?>
         <div class="wrap wpranklab-wrap">
             <h1><?php esc_html_e( 'WPRankLab – AI Visibility Overview', 'wpranklab' ); ?></h1>
+            
+            <?php
+if ( class_exists( 'WPRankLab_Batch_Scan' ) ) {
+    $state = WPRankLab_Batch_Scan::get_instance()->get_state();
+
+    if ( isset( $_GET['wpranklab_batch'] ) && 'started' === $_GET['wpranklab_batch'] ) : ?>
+        <div class="notice notice-success is-dismissible">
+            <p><?php esc_html_e( 'Batch scan started. It will run in the background via WP-Cron.', 'wpranklab' ); ?></p>
+        </div>
+    <?php endif;
+
+    if ( 'running' === $state['status'] && $state['total'] > 0 ) : ?>
+        <div class="notice notice-info">
+            <p>
+                <?php
+                printf(
+                    esc_html__( 'Batch scan running: %1$d / %2$d scanned', 'wpranklab' ),
+                    (int) $state['progress'],
+                    (int) $state['total']
+                );
+                ?>
+            </p>
+        </div>
+    <?php elseif ( 'complete' === $state['status'] ) : ?>
+        <div class="notice notice-success is-dismissible">
+            <p><?php esc_html_e( 'Batch scan complete.', 'wpranklab' ); ?></p>
+        </div>
+    <?php endif;
+}
+?>
+            
 
             <?php if ( $scan_done ) : ?>
                 <div class="notice notice-success is-dismissible">
@@ -1738,8 +1769,15 @@ if ( ! $is_pro ) {
         if ( $query->have_posts() && class_exists( 'WPRankLab_Analyzer' ) ) {
             $analyzer = WPRankLab_Analyzer::get_instance();
             foreach ( $query->posts as $post_id ) {
-                $analyzer->analyze_post( $post_id );
-                $scanned++;
+                $post_types = apply_filters(
+                    'wpranklab_analyzer_post_types',
+                    array( 'post', 'page' )
+                    );
+                
+                if ( class_exists( 'WPRankLab_Batch_Scan' ) ) {
+                    WPRankLab_Batch_Scan::get_instance()->start_scan( $post_types );
+                }
+                
             }
         }
 
@@ -1747,15 +1785,15 @@ if ( ! $is_pro ) {
 
         $redirect = add_query_arg(
             array(
-                'page'                  => 'wpranklab',
-                'wpranklab_scan_all'    => 'done',
-                'wpranklab_scan_count'  => $scanned,
+                'page'               => 'wpranklab',
+                'wpranklab_batch'    => 'started',
             ),
             admin_url( 'admin.php' )
-        );
-
+            );
+        
         wp_redirect( $redirect );
         exit;
+        
     }
 
     /**

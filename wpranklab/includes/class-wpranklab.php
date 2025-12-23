@@ -65,6 +65,28 @@ class WPRankLab {
             WPRankLab_Internal_Links::get_instance()->init();
         }
         
+        // Initialize batch scan engine.
+        if ( class_exists( 'WPRankLab_Batch_Scan' ) ) {
+            WPRankLab_Batch_Scan::get_instance()->init();
+        }
+        
+        // Connect batch scan hook to the existing per-post analyzer pipeline.
+        add_action( 'wpranklab_scan_single_post', function( $post_id ) {
+            $post_id = (int) $post_id;
+            if ( $post_id <= 0 ) {
+                return;
+            }
+            
+            if ( class_exists( 'WPRankLab_Analyzer' ) ) {
+                $analyzer = WPRankLab_Analyzer::get_instance();
+                if ( is_object( $analyzer ) && method_exists( $analyzer, 'analyze_post' ) ) {
+                    // Same call used by handle_scan_post() in admin.
+                    $analyzer->analyze_post( $post_id );
+                }
+            }
+        }, 10, 1 );
+            
+        
         if ( is_admin() && class_exists( 'WPRankLab_Admin' ) ) {
             $this->load_admin();
         }
