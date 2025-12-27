@@ -274,6 +274,42 @@ class WPRankLab_Admin {
             WPRANKLAB_OPTION_LICENSE,
             array( $this, 'sanitize_license' )
         );
+        
+        add_settings_field(
+            'webhook_enabled',
+            __( 'Enable Make.com Webhook', 'wpranklab' ),
+            array( $this, 'render_checkbox' ),
+            'wpranklab',
+            'wpranklab_main',
+            array( 'key' => 'webhook_enabled' )
+            );
+        
+        add_settings_field(
+            'webhook_url',
+            __( 'Make.com Webhook URL', 'wpranklab' ),
+            array( $this, 'render_text' ),
+            'wpranklab',
+            'wpranklab_main',
+            array( 'key' => 'webhook_url' )
+            );
+        
+        add_settings_field(
+            'wpranklab_webhook_enabled',
+            __( 'Enable Make.com Webhook', 'wpranklab' ),
+            array( $this, 'field_webhook_enabled' ),
+            'wpranklab-settings',
+            'wpranklab_settings_main'
+            );
+        
+        add_settings_field(
+            'wpranklab_webhook_url',
+            __( 'Make.com Webhook URL', 'wpranklab' ),
+            array( $this, 'field_webhook_url' ),
+            'wpranklab-settings',
+            'wpranklab_settings_main'
+            );
+        
+        
     }
 
     /**
@@ -281,6 +317,10 @@ class WPRankLab_Admin {
      */
     public function sanitize_settings( $input ) {
         $output = $this->settings;
+        
+        $output['webhook_enabled'] = isset( $input['webhook_enabled'] ) ? (int) $input['webhook_enabled'] : 0;
+        $output['webhook_url']     = isset( $input['webhook_url'] ) ? esc_url_raw( (string) $input['webhook_url'] ) : '';
+        
 
         $output['openai_api_key'] = isset( $input['openai_api_key'] )
             ? sanitize_text_field( $input['openai_api_key'] )
@@ -939,6 +979,42 @@ document.addEventListener('DOMContentLoaded', function () {
         </label>
         <?php
     }
+    
+    public function field_webhook_enabled() {
+        $enabled = isset( $this->settings['webhook_enabled'] ) ? (int) $this->settings['webhook_enabled'] : 0;
+        ?>
+    <label>
+        <input type="checkbox"
+               name="<?php echo esc_attr( WPRANKLAB_OPTION_SETTINGS ); ?>[webhook_enabled]"
+               value="1" <?php checked( $enabled, 1 ); ?> />
+        <?php esc_html_e( 'Send a JSON payload to Make.com when the weekly report runs.', 'wpranklab' ); ?>
+    </label>
+    <?php
+
+    $last_sent  = isset( $this->settings['webhook_last_sent'] ) ? (string) $this->settings['webhook_last_sent'] : '';
+    $last_code  = isset( $this->settings['webhook_last_code'] ) ? (int) $this->settings['webhook_last_code'] : 0;
+    $last_error = isset( $this->settings['webhook_last_error'] ) ? (string) $this->settings['webhook_last_error'] : '';
+
+    echo '<p class="description">' . esc_html__( 'Last webhook:', 'wpranklab' ) . ' ' . esc_html( $last_sent ? $last_sent : '—' ) .
+         ' | ' . esc_html__( 'HTTP:', 'wpranklab' ) . ' ' . esc_html( $last_code ? (string) $last_code : '—' ) . '</p>';
+
+    if ( $last_error ) {
+        echo '<p class="description" style="color:#b32d2e">' . esc_html__( 'Error:', 'wpranklab' ) . ' ' . esc_html( $last_error ) . '</p>';
+    }
+}
+
+public function field_webhook_url() {
+    $value = isset( $this->settings['webhook_url'] ) ? (string) $this->settings['webhook_url'] : '';
+    ?>
+    <input type="url"
+           class="regular-text"
+           name="<?php echo esc_attr( WPRANKLAB_OPTION_SETTINGS ); ?>[webhook_url]"
+           value="<?php echo esc_attr( $value ); ?>"
+           placeholder="https://hook.us1.make.com/xxxxxxxxxxxxxxxxxxxx" />
+    <p class="description"><?php esc_html_e( 'Paste the Make.com webhook URL.', 'wpranklab' ); ?></p>
+    <?php
+}
+    
 
     /**
      * Register AI Visibility metabox.

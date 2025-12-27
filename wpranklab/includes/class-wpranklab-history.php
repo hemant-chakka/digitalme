@@ -37,6 +37,9 @@ class WPRankLab_History {
 
         // Hook weekly report event (already scheduled by activator).
         add_action( 'wpranklab_weekly_report', array( $this, 'handle_weekly_event' ) );
+        
+        add_action( 'init', array( $this, 'ensure_weekly_event' ) );
+        
     }
 
     /**
@@ -77,9 +80,23 @@ class WPRankLab_History {
      * Handle weekly cron: record snapshot + send email.
      */
     public function handle_weekly_event() {
+        
+        // Prevent duplicate weekly sends if WP-Cron triggers twice.
+        if ( get_transient( 'wpranklab_weekly_report_lock' ) ) {
+            return;
+        }
+        set_transient( 'wpranklab_weekly_report_lock', 1, 15 * MINUTE_IN_SECONDS );
+        
         $snapshot = $this->record_snapshot();
+        
+        // Email (should already exist)
         $this->send_weekly_email( $snapshot );
+        
+        // Webhook (you already have this method)
+        $this->send_webhook();
     }
+    
+    
 
     /**
      * Record a history snapshot for the current site state.
@@ -189,10 +206,22 @@ class WPRankLab_History {
      * @param array $snapshot
      */
     public function send_weekly_email( $snapshot ) {
+        $settings = get_option( 'wpranklab_settings', array() );
+        if ( empty( $settings['weekly_email'] ) ) {
+            return;
+        }
+        
+        
         // If there is no data yet, do not send.
         if ( empty( $snapshot ) ) {
             return;
         }
+        
+        $settings = get_option( WPRANKLAB_OPTION_SETTINGS, array() );
+        if ( empty( $settings['weekly_email'] ) ) {
+            return;
+        }
+        
 
         $is_pro  = function_exists( 'wpranklab_is_pro_active' ) && wpranklab_is_pro_active();
         $site    = get_bloginfo( 'name' );
@@ -273,14 +302,74 @@ class WPRankLab_History {
                 'to'      => $to,
                 'subject' => $subject,
                 'body'    => $body,
-                'headers' => '',
+                'headers' => array(
+                    'Content-Type: text/plain; charset=UTF-8',
+                    'From: ' . get_bloginfo( 'name' ) . ' <' . get_option( 'admin_email' ) . '>',
+                ),
             ),
             $snapshot,
             $is_pro
         );
 
         if ( ! empty( $email['to'] ) && ! empty( $email['subject'] ) && ! empty( $email['body'] ) ) {
-            wp_mail( $email['to'], $email['subject'], $email['body'], $email['headers'] );
+            $headers = array(
+                'Content-Type: text/plain; charset=UTF-8',
+                'From: ' . get_bloginfo( 'name' ) . ' <' . get_option( 'admin_email' ) . '>',
+            );
+            
+            wp_mail( $email['to'], $email['subject'], $email['body'], $headers );
         }
     }
+    
+    /**
+     * Ensure weekly cron event is scheduled.
+     */
+    public function ensure_weekly_event() {
+        if ( ! wp_next_scheduled( 'wpranklab_weekly_report' ) ) {
+            wp_schedule_event( time() + HOUR_IN_SECONDS, 'weekly', 'wpranklab_weekly_report' );
+        }
+    }
+    
+    
+    public function send_webhook( $snapshot = array() ) {
+        
+        $settings = get_option( 'wpranklab_settings', array() );
+        
+        if ( empty( $settings['webhook_enabled'] ) || empty( $settings['webhook_url'] ) ) {
+            return;
+        }
+        
+        $payload = array(
+            'event'          => 'weekly_report',
+            'site_url'       => site_url(),
+            'site_name'      => get_bloginfo( 'name' ),
+            'snapshot_date'  => isset( $snapshot['snapshot_date'] ) ? $snapshot['snapshot_date'] : current_time( 'mysql' ),
+            'avg_score'      => isset( $snapshot['avg_score'] ) ? $snapshot['avg_score'] : null,
+            'scanned_count'  => isset( $snapshot['scanned_count'] ) ? (int) $snapshot['scanned_count'] : 0,
+            'plugin_version' => defined( 'WPRANKLAB_VERSION' ) ? WPRANKLAB_VERSION : '',
+            'timestamp'      => time(),
+        );
+        
+        
+        $response = wp_remote_post( $settings['webhook_url'], array(
+            'timeout' => 10,
+            'headers' => array( 'Content-Type' => 'application/json' ),
+            'body'    => wp_json_encode( $payload ),
+        ) );
+        
+        $settings['webhook_last_sent'] = current_time( 'mysql' );
+        
+        if ( is_wp_error( $response ) ) {
+            $settings['webhook_last_code']  = 0;
+            $settings['webhook_last_error'] = $response->get_error_message();
+        } else {
+            $settings['webhook_last_code']  = (int) wp_remote_retrieve_response_code( $response );
+            $settings['webhook_last_error'] = '';
+        }
+        
+        update_option( 'wpranklab_settings', $settings );
+    }
+    
+    
+    
 }

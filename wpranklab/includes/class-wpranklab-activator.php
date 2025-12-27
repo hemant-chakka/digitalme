@@ -106,6 +106,12 @@ class WPRankLab_Activator {
             'weekly_email'    => 1,
             'email_day'       => 'monday',
             'email_time'      => '09:00',
+            'webhook_enabled'   => 0,
+            'webhook_url'       => '',
+            'webhook_last_sent' => '',
+            'webhook_last_code' => 0,
+            'webhook_last_error'=> '',
+            
         );
 
         if ( ! get_option( WPRANKLAB_OPTION_SETTINGS ) ) {
