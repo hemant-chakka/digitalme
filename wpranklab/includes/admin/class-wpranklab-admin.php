@@ -63,6 +63,8 @@ class WPRankLab_Admin {
         
         add_action( 'admin_post_wpranklab_insert_internal_link', array( $this, 'handle_insert_internal_link' ) );
         
+        add_action( 'admin_post_wpranklab_generate_checklist', array( $this, 'handle_generate_checklist' ) );
+        
         add_action( 'wp_ajax_wpranklab_internal_link_block', array( $this, 'ajax_internal_link_block' ) );
         
         add_action( 'admin_notices', array( $this, 'maybe_show_internal_link_notice' ) );
@@ -207,6 +209,34 @@ class WPRankLab_Admin {
             'wpranklab-upgrade',
             array( $this, 'render_upgrade_page' )
         );
+    
+        add_submenu_page(
+            'wpranklab',
+            __( 'Entity Graph', 'wpranklab' ),
+            __( 'Entity Graph', 'wpranklab' ),
+            $cap,
+            'wpranklab-entity-graph',
+            array( $this, 'render_entity_graph_page' )
+        );
+
+        add_submenu_page(
+            'wpranklab',
+            __( 'Competitors', 'wpranklab' ),
+            __( 'Competitors', 'wpranklab' ),
+            $cap,
+            'wpranklab-competitors',
+            array( $this, 'render_competitors_page' )
+        );
+
+        add_submenu_page(
+            'wpranklab',
+            __( 'AI SEO Checklist', 'wpranklab' ),
+            __( 'AI SEO Checklist', 'wpranklab' ),
+            $cap,
+            'wpranklab-checklist',
+            array( $this, 'render_checklist_page' )
+        );
+
     }
 
     /**

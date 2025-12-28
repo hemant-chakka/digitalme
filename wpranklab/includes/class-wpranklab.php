@@ -27,12 +27,16 @@ class WPRankLab {
      */
     public function __construct() {
         // Future: init public hooks, cron, scanners, etc.
+        add_filter( 'cron_schedules', array( $this, 'add_cron_schedules' ) );
+        
+        
     }
 
     /**
      * Register all hooks.
      */
     public function run() {
+        
         // Initialize license manager first so other components can check Pro status.
         if ( class_exists( 'WPRankLab_License_Manager' ) ) {
             $this->license_manager = WPRankLab_License_Manager::get_instance();
@@ -94,6 +98,17 @@ class WPRankLab {
 
         // Future: add more cron hooks, REST routes, etc.
     }
+    
+    public function add_cron_schedules( $schedules ) {
+        if ( ! isset( $schedules['weekly'] ) ) {
+            $schedules['weekly'] = array(
+                'interval' => 7 * DAY_IN_SECONDS,
+                'display'  => __( 'Once Weekly', 'wpranklab' ),
+            );
+        }
+        return $schedules;
+    }
+    
 
     /**
      * Load admin functionality.
@@ -102,4 +117,5 @@ class WPRankLab {
         $this->admin = new WPRankLab_Admin();
         $this->admin->init();
     }
+    
 }
