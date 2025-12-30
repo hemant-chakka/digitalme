@@ -103,7 +103,17 @@ wpranklab_run();
  */
 function wpranklab_is_pro_active() {
     
-    return true;
+    // Demo override (admin enabled, auto-expire)
+    $settings = get_option( WPRANKLAB_OPTION_SETTINGS, array() );
+    
+    $demo_on   = ! empty( $settings['demo_force_pro'] );
+    $demo_until= isset( $settings['demo_force_pro_until'] ) ? (int) $settings['demo_force_pro_until'] : 0;
+    
+    if ( $demo_on && $demo_until && time() <= $demo_until ) {
+        return true;
+    }
+    
+    
     // Pro is enabled only via a valid license (Free users do not need a key).
     if ( class_exists( 'WPRankLab_License_Manager' ) ) {
         $license_manager = WPRankLab_License_Manager::get_instance();

@@ -111,6 +111,10 @@ class WPRankLab_Activator {
             'webhook_last_sent' => '',
             'webhook_last_code' => 0,
             'webhook_last_error'=> '',
+            'demo_force_pro'       => 0,
+            'demo_force_pro_days'  => 3,
+            'demo_force_pro_until' => 0,
+            
             
         );
 

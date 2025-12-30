@@ -94,6 +94,10 @@ class WPRankLab_Admin {
             }
         }, 100 );
             
+        add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_entity_graph_assets' ) );
+        
+        add_action( 'wp_ajax_wpranklab_entity_graph_data', array( $this, 'ajax_entity_graph_data' ) );
+            
             
             
 
@@ -290,7 +294,7 @@ class WPRankLab_Admin {
             __( 'AI SEO Checklist', 'wpranklab' ),
             $cap,
             'wpranklab-checklist',
-            array( $this, 'render_checklist_page' )
+            array( $this, 'render_ai_seo_checklist_page' )
         );
 
     }
@@ -395,6 +399,42 @@ class WPRankLab_Admin {
             'wpranklab_settings_main'
             );
         
+        add_settings_field(
+            'wpranklab_demo_force_pro',
+            __( 'Demo: Force Pro Mode', 'wpranklab' ),
+            array( $this, 'field_demo_force_pro' ),
+            'wpranklab-settings',
+            'wpranklab_settings_main'
+            );
+        
+        add_settings_field(
+            'wpranklab_demo_force_pro_days',
+            __( 'Demo duration (days)', 'wpranklab' ),
+            array( $this, 'field_demo_force_pro_days' ),
+            'wpranklab-settings',
+            'wpranklab_settings_main'
+            );
+        
+        // Set/clear expiry timestamp based on the toggle
+        $old_settings = get_option( WPRANKLAB_OPTION_SETTINGS, array() );
+        $was_enabled  = ! empty( $old_settings['demo_force_pro'] );
+        $now_enabled  = ! empty( $output['demo_force_pro'] );
+        
+        if ( $now_enabled ) {
+            // If just enabled, set expiry
+            if ( ! $was_enabled ) {
+                $output['demo_force_pro_until'] = time() + (int) $output['demo_force_pro_days'] * DAY_IN_SECONDS;
+            } else {
+                // keep existing expiry if still enabled
+                $output['demo_force_pro_until'] = isset( $old_settings['demo_force_pro_until'] ) ? (int) $old_settings['demo_force_pro_until'] : ( time() + 3 * DAY_IN_SECONDS );
+            }
+        } else {
+            // If disabled, clear expiry
+            $output['demo_force_pro_until'] = 0;
+        }
+        
+        
+        
         
     }
 
@@ -432,6 +472,32 @@ class WPRankLab_Admin {
             $cache_minutes = 10080;
         }
         $output['ai_cache_minutes'] = $cache_minutes;
+        
+        $output['demo_force_pro'] = isset( $input['demo_force_pro'] ) ? (int) $input['demo_force_pro'] : 0;
+        
+        $days = isset( $input['demo_force_pro_days'] ) ? absint( $input['demo_force_pro_days'] ) : 3;
+        if ( $days < 1 ) { $days = 1; }
+        if ( $days > 14 ) { $days = 14; } // cap for safety
+        $output['demo_force_pro_days'] = $days;
+        
+        // --- Demo expiry handling (fix) ---
+        $existing = get_option( WPRANKLAB_OPTION_SETTINGS, array() );
+        
+        $now_enabled = ! empty( $output['demo_force_pro'] );
+        $old_until   = isset( $existing['demo_force_pro_until'] ) ? (int) $existing['demo_force_pro_until'] : 0;
+        
+        if ( $now_enabled ) {
+            // If expiry is missing or already expired, set a fresh expiry.
+            if ( $old_until <= time() ) {
+                $old_until = time() + (int) $output['demo_force_pro_days'] * DAY_IN_SECONDS;
+            }
+            $output['demo_force_pro_until'] = $old_until;
+        } else {
+            // If disabled, clear expiry.
+            $output['demo_force_pro_until'] = 0;
+        }
+        
+        
 
         return $output;
     }
@@ -608,6 +674,48 @@ class WPRankLab_Admin {
             )
             );
     }
+    
+    public function enqueue_entity_graph_assets( $hook_suffix ) {
+        // Adjust this to match your actual page hook.
+        // Easiest: check `$_GET['page']`.
+        if ( empty( $_GET['page'] ) || 'wpranklab-entity-graph' !== $_GET['page'] ) {
+            return;
+        }
+        
+        // vis-network (CDN) – quick V1 approach
+        wp_enqueue_style(
+        'wpranklab-vis-network',
+        'https://unpkg.com/vis-network/styles/vis-network.min.css',
+        array(),
+        '9.1.9'
+            );
+        
+        wp_enqueue_script(
+            'wpranklab-vis-network',
+            'https://unpkg.com/vis-network/standalone/umd/vis-network.min.js',
+            array(),
+            '9.1.9',
+            true
+            );
+        
+        wp_enqueue_script(
+            'wpranklab-entity-graph',
+            plugins_url( 'assets/js/wpranklab-entity-graph.js', WPRANKLAB_PLUGIN_FILE ),
+            array( 'wpranklab-vis-network' ),
+            defined( 'WPRANKLAB_VERSION' ) ? WPRANKLAB_VERSION : '0.0.0',
+            true
+            );
+        
+        wp_localize_script(
+            'wpranklab-entity-graph',
+            'WPRankLabEntityGraph',
+            array(
+                'nonce' => wp_create_nonce( 'wpranklab_entity_graph' ),
+                'ajax'  => admin_url( 'admin-ajax.php' ),
+            )
+            );
+    }
+    
     
     
     /**
@@ -1052,6 +1160,323 @@ document.addEventListener('DOMContentLoaded', function () {
         </div>
         <?php
     }
+    
+    /**
+ * Render the Entity Graph admin page.
+ */
+public function render_entity_graph_page() {
+    if ( ! current_user_can( 'manage_options' ) ) {
+        wp_die( esc_html__( 'You do not have permission to access this page.', 'wpranklab' ) );
+    }
+
+    echo '<div id="wpranklab-entity-graph" style="height:520px;border:1px solid #ccd0d4;border-radius:8px;background:#fff;"></div>';
+    echo '<p class="description">' . esc_html__( 'Tip: drag nodes, zoom, click an entity.', 'wpranklab' ) . '</p>';
+      
+    
+    // Optional Pro gate (keep if your product design requires it)
+    if ( function_exists( 'wpranklab_is_pro_active' ) && ! wpranklab_is_pro_active() ) {
+        echo '<div class="wrap">';
+        echo '<h1>' . esc_html__( 'Entity Graph', 'wpranklab' ) . '</h1>';
+        echo '<p>' . esc_html__( 'This is a Pro feature. Upgrade to Pro to unlock Entity Graph.', 'wpranklab' ) . '</p>';
+        echo '</div>';
+        return;
+    }
+
+    global $wpdb;
+
+    $entities_table    = $wpdb->prefix . WPRANKLAB_TABLE_ENTITIES;
+    $entity_post_table = $wpdb->prefix . WPRANKLAB_TABLE_ENTITY_POST;
+
+    // Query top entities by number of associated posts.
+    $rows = $wpdb->get_results(
+        "SELECT
+            e.id,
+            e.name,
+            e.type,
+            COUNT(DISTINCT ep.post_id) AS posts_count,
+            MAX(ep.last_seen) AS last_seen
+         FROM {$entities_table} e
+         INNER JOIN {$entity_post_table} ep ON ep.entity_id = e.id
+         GROUP BY e.id, e.name, e.type
+         ORDER BY posts_count DESC, last_seen DESC
+         LIMIT 100",
+        ARRAY_A
+    );
+
+    echo '<div class="wrap">';
+    echo '<h1>' . esc_html__( 'Entity Graph', 'wpranklab' ) . '</h1>';
+    echo '<p class="description">' . esc_html__( 'Basic view: Top entities detected across your content.', 'wpranklab' ) . '</p>';
+
+    if ( empty( $rows ) ) {
+        echo '<div class="notice notice-warning"><p>';
+        echo esc_html__( 'No entities found yet. Run an AI Visibility Scan (or Batch Scan) and ensure entity extraction is enabled, then refresh this page.', 'wpranklab' );
+        echo '</p></div>';
+        echo '</div>';
+        return;
+    }
+
+    echo '<table class="widefat striped">';
+    echo '<thead><tr>';
+    echo '<th>' . esc_html__( 'Entity', 'wpranklab' ) . '</th>';
+    echo '<th>' . esc_html__( 'Type', 'wpranklab' ) . '</th>';
+    echo '<th>' . esc_html__( 'Posts', 'wpranklab' ) . '</th>';
+    echo '<th>' . esc_html__( 'Last Seen', 'wpranklab' ) . '</th>';
+    echo '</tr></thead>';
+
+    echo '<tbody>';
+    foreach ( $rows as $r ) {
+        $name       = isset( $r['name'] ) ? (string) $r['name'] : '';
+        $type       = isset( $r['type'] ) ? (string) $r['type'] : '';
+        $posts_cnt  = isset( $r['posts_count'] ) ? (int) $r['posts_count'] : 0;
+        $last_seen  = isset( $r['last_seen'] ) ? (string) $r['last_seen'] : '';
+
+        echo '<tr>';
+        echo '<td><strong>' . esc_html( $name ) . '</strong></td>';
+        echo '<td>' . esc_html( $type ) . '</td>';
+        echo '<td>' . esc_html( (string) $posts_cnt ) . '</td>';
+        echo '<td>' . esc_html( $last_seen ? $last_seen : '—' ) . '</td>';
+        echo '</tr>';
+    }
+    echo '</tbody>';
+
+    echo '</table>';
+
+    echo '<p class="description" style="margin-top:10px;">' .
+        esc_html__( 'Next iteration: show entity relationships (entity ↔ entity), and per-post coverage.', 'wpranklab' ) .
+    '</p>';
+
+    echo '</div>';
+}
+
+/**
+ * Render the Competitors admin page (basic demo).
+ */
+public function render_competitors_page() {
+    if ( ! current_user_can( 'manage_options' ) ) {
+        wp_die( esc_html__( 'You do not have permission to access this page.', 'wpranklab' ) );
+    }
+    
+    // Optional Pro gate (keep consistent with your product rules)
+    if ( function_exists( 'wpranklab_is_pro_active' ) && ! wpranklab_is_pro_active() ) {
+        echo '<div class="wrap">';
+        echo '<h1>' . esc_html__( 'Competitors', 'wpranklab' ) . '</h1>';
+        echo '<p>' . esc_html__( 'This is a Pro feature. Upgrade to Pro to unlock competitor comparison.', 'wpranklab' ) . '</p>';
+        echo '</div>';
+        return;
+    }
+    
+    $settings = get_option( WPRANKLAB_OPTION_SETTINGS, array() );
+    $list     = isset( $settings['competitors'] ) && is_array( $settings['competitors'] ) ? $settings['competitors'] : array();
+    
+    // Save handler
+    if ( isset( $_POST['wpranklab_competitors_submit'] ) ) {
+        check_admin_referer( 'wpranklab_save_competitors' );
+        
+        $raw = isset( $_POST['wpranklab_competitors'] ) ? (string) wp_unslash( $_POST['wpranklab_competitors'] ) : '';
+        $lines = preg_split( "/\r\n|\n|\r/", $raw );
+        $clean = array();
+        
+        foreach ( $lines as $line ) {
+            $u = trim( $line );
+            if ( '' === $u ) { continue; }
+            $u = esc_url_raw( $u );
+            if ( '' === $u ) { continue; }
+            $clean[] = $u;
+            if ( count( $clean ) >= 10 ) { break; } // demo cap
+        }
+        
+        $settings['competitors'] = $clean;
+        update_option( WPRANKLAB_OPTION_SETTINGS, $settings );
+        $list = $clean;
+        
+        echo '<div class="notice notice-success is-dismissible"><p>' .
+            esc_html__( 'Competitors saved.', 'wpranklab' ) .
+            '</p></div>';
+    }
+    
+    echo '<div class="wrap">';
+    echo '<h1>' . esc_html__( 'Competitors', 'wpranklab' ) . '</h1>';
+    echo '<p class="description">' . esc_html__( 'Basic demo: store competitor URLs. Next iteration: fetch + compare AI visibility signals.', 'wpranklab' ) . '</p>';
+    
+    echo '<form method="post">';
+    wp_nonce_field( 'wpranklab_save_competitors' );
+    
+    $textarea = implode( "\n", array_map( 'esc_url', $list ) );
+    
+    echo '<table class="form-table" role="presentation"><tbody><tr>';
+    echo '<th scope="row">' . esc_html__( 'Competitor URLs (one per line)', 'wpranklab' ) . '</th>';
+    echo '<td>';
+    echo '<textarea name="wpranklab_competitors" rows="8" class="large-text code" placeholder="https://example.com">' . esc_textarea( $textarea ) . '</textarea>';
+    echo '<p class="description">' . esc_html__( 'Up to 10 URLs for this demo.', 'wpranklab' ) . '</p>';
+    echo '</td></tr></tbody></table>';
+    
+    submit_button( __( 'Save Competitors', 'wpranklab' ), 'primary', 'wpranklab_competitors_submit' );
+    
+    echo '</form>';
+    
+    if ( ! empty( $list ) ) {
+        echo '<h2 style="margin-top:20px;">' . esc_html__( 'Current list', 'wpranklab' ) . '</h2>';
+        echo '<ul style="list-style:disc;padding-left:20px;">';
+        foreach ( $list as $u ) {
+            echo '<li><a href="' . esc_url( $u ) . '" target="_blank" rel="noopener noreferrer">' . esc_html( $u ) . '</a></li>';
+        }
+        echo '</ul>';
+    }
+    
+    echo '</div>';
+}
+
+/**
+ * Render AI SEO Checklist page (basic demo) + generate .txt in uploads.
+ */
+public function render_ai_seo_checklist_page() {
+    if ( ! current_user_can( 'manage_options' ) ) {
+        wp_die( esc_html__( 'You do not have permission to access this page.', 'wpranklab' ) );
+    }
+    
+    $settings = get_option( WPRANKLAB_OPTION_SETTINGS, array() );
+    
+    $last_generated = isset( $settings['checklist_last_generated'] ) ? (string) $settings['checklist_last_generated'] : '';
+    
+    $uploads = wp_upload_dir();
+    $dir     = trailingslashit( $uploads['basedir'] ) . 'wpranklab';
+    $url_dir = trailingslashit( $uploads['baseurl'] ) . 'wpranklab';
+    $file    = trailingslashit( $dir ) . 'wpranklab-ai-seo-checklist.txt';
+    $file_url= trailingslashit( $url_dir ) . 'wpranklab-ai-seo-checklist.txt';
+    
+    // Generate handler
+    if ( isset( $_POST['wpranklab_generate_checklist'] ) ) {
+        check_admin_referer( 'wpranklab_generate_checklist' );
+        
+        if ( ! wp_mkdir_p( $dir ) ) {
+            echo '<div class="notice notice-error"><p>' . esc_html__( 'Could not create uploads/wpranklab directory.', 'wpranklab' ) . '</p></div>';
+        } else {
+            $content  = "WPRankLab — AI SEO Checklist\n";
+            $content .= "Generated: " . current_time( 'mysql' ) . "\n";
+            $content .= "Site: " . site_url() . "\n\n";
+            
+            $content .= "Checklist\n";
+            $content .= "---------\n";
+            $content .= "- Add clear, concise answers to common questions (FAQ/Q&A blocks)\n";
+            $content .= "- Use entities consistently (people/brands/products/locations)\n";
+            $content .= "- Add FAQ/HowTo schema where relevant\n";
+            $content .= "- Improve internal linking to key pages\n";
+            $content .= "- Ensure headings outline the topic clearly (H2/H3)\n";
+            $content .= "- Add a short AI-friendly summary near the top of important pages\n";
+            $content .= "- Keep paragraphs short; use lists for steps and key points\n";
+            $content .= "- Keep author/about/contact info clear for trust signals\n\n";
+            
+            // Optional: list top posts by AI score if meta exists (demo-friendly)
+            $content .= "Top Content (by AI Visibility Score)\n";
+            $content .= "---------------------------------\n";
+            
+            // Adjust meta key if yours differs
+            $score_key = 'wpranklab_ai_score';
+            
+            $q = new WP_Query( array(
+                'post_type'      => array( 'post', 'page' ),
+                'posts_per_page' => 20,
+                'post_status'    => 'publish',
+                'meta_key'       => $score_key,
+                'orderby'        => 'meta_value_num',
+                'order'          => 'DESC',
+            ) );
+            
+            if ( $q->have_posts() ) {
+                while ( $q->have_posts() ) {
+                    $q->the_post();
+                    $pid   = get_the_ID();
+                    $title = get_the_title();
+                    $link  = get_permalink( $pid );
+                    $score = get_post_meta( $pid, $score_key, true );
+                    $content .= "- {$title} | Score: {$score} | {$link}\n";
+                }
+                wp_reset_postdata();
+            } else {
+                $content .= "- (No scored posts found yet. Run scans first.)\n";
+            }
+            
+            $written = file_put_contents( $file, $content );
+            
+            if ( false === $written ) {
+                echo '<div class="notice notice-error"><p>' . esc_html__( 'Failed to write checklist file.', 'wpranklab' ) . '</p></div>';
+            } else {
+                $settings['checklist_last_generated'] = current_time( 'mysql' );
+                update_option( WPRANKLAB_OPTION_SETTINGS, $settings );
+                $last_generated = $settings['checklist_last_generated'];
+                
+                echo '<div class="notice notice-success is-dismissible"><p>' .
+                    esc_html__( 'Checklist generated.', 'wpranklab' ) .
+                    '</p></div>';
+            }
+        }
+    }
+    
+    echo '<div class="wrap">';
+    echo '<h1>' . esc_html__( 'AI SEO Checklist', 'wpranklab' ) . '</h1>';
+    echo '<p class="description">' . esc_html__( 'Basic demo: generate a crawlable .txt checklist file for your site.', 'wpranklab' ) . '</p>';
+    
+    echo '<form method="post" style="margin:16px 0;">';
+    wp_nonce_field( 'wpranklab_generate_checklist' );
+    submit_button( __( 'Generate / Refresh Checklist (.txt)', 'wpranklab' ), 'primary', 'wpranklab_generate_checklist' );
+    echo '</form>';
+    
+    echo '<table class="widefat striped" style="max-width:900px;">';
+    echo '<tbody>';
+    echo '<tr><th style="width:220px;">' . esc_html__( 'Last generated', 'wpranklab' ) . '</th><td>' . esc_html( $last_generated ? $last_generated : '—' ) . '</td></tr>';
+    
+    if ( file_exists( $file ) ) {
+        echo '<tr><th>' . esc_html__( 'Checklist URL', 'wpranklab' ) . '</th><td><a href="' . esc_url( $file_url ) . '" target="_blank" rel="noopener noreferrer">' . esc_html( $file_url ) . '</a></td></tr>';
+        echo '<tr><th>' . esc_html__( 'File path', 'wpranklab' ) . '</th><td><code>' . esc_html( $file ) . '</code></td></tr>';
+    } else {
+        echo '<tr><th>' . esc_html__( 'Checklist file', 'wpranklab' ) . '</th><td>' . esc_html__( 'Not generated yet.', 'wpranklab' ) . '</td></tr>';
+    }
+    
+    echo '</tbody></table>';
+    
+    echo '</div>';
+}
+
+public function field_demo_force_pro() {
+    $enabled = isset( $this->settings['demo_force_pro'] ) ? (int) $this->settings['demo_force_pro'] : 0;
+    $until   = isset( $this->settings['demo_force_pro_until'] ) ? (int) $this->settings['demo_force_pro_until'] : 0;
+    
+    if ( $enabled && $until && time() > $until ) {
+        $enabled = 0; // expired (UI reflects it)
+    }
+    
+    ?>
+    <label>
+        <input type="checkbox"
+               name="<?php echo esc_attr( WPRANKLAB_OPTION_SETTINGS ); ?>[demo_force_pro]"
+               value="1" <?php checked( $enabled, 1 ); ?> />
+        <?php esc_html_e( 'Force Pro features for demo (admin only).', 'wpranklab' ); ?>
+    </label>
+    <?php
+    if ( $until ) {
+        echo '<p class="description">' . esc_html__( 'Demo expires:', 'wpranklab' ) . ' <strong>' . esc_html( wp_date( 'Y-m-d H:i', $until ) ) . '</strong></p>';
+    } else {
+        echo '<p class="description">' . esc_html__( 'When enabled, Pro mode will automatically expire.', 'wpranklab' ) . '</p>';
+    }
+}
+
+public function field_demo_force_pro_days() {
+    $days = isset( $this->settings['demo_force_pro_days'] ) ? (int) $this->settings['demo_force_pro_days'] : 3;
+    ?>
+    <input type="number"
+           min="1"
+           max="14"
+           name="<?php echo esc_attr( WPRANKLAB_OPTION_SETTINGS ); ?>[demo_force_pro_days]"
+           value="<?php echo esc_attr( $days ); ?>"
+           style="width:80px;" />
+    <p class="description"><?php esc_html_e( '1–14 days. Keeps demo mode from being left on forever.', 'wpranklab' ); ?></p>
+    <?php
+}
+
+
+
+
+    
 
     /**
      * Field: OpenAI API key.
@@ -2289,6 +2714,81 @@ if ( ! $is_pro ) {
         ) );
     }
     
+    
+    public function ajax_entity_graph_data() {
+        check_ajax_referer( 'wpranklab_entity_graph', 'nonce' );
+        
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_send_json_error( array( 'message' => 'Permission denied.' ) );
+        }
+        
+        global $wpdb;
+        
+        $entities_table    = $wpdb->prefix . WPRANKLAB_TABLE_ENTITIES;
+        $entity_post_table = $wpdb->prefix . WPRANKLAB_TABLE_ENTITY_POST;
+        
+        // Top entities by posts_count (limit keeps graph readable)
+        $top = $wpdb->get_results(
+        "SELECT e.id, e.name, e.type, COUNT(DISTINCT ep.post_id) AS posts_count
+         FROM {$entities_table} e
+         INNER JOIN {$entity_post_table} ep ON ep.entity_id = e.id
+         GROUP BY e.id, e.name, e.type
+         ORDER BY posts_count DESC
+         LIMIT 40",
+         ARRAY_A
+        );
+        
+        if ( empty( $top ) ) {
+            wp_send_json_success( array( 'nodes' => array(), 'edges' => array() ) );
+        }
+        
+        $ids = array_map( 'intval', array_column( $top, 'id' ) );
+        $ids_in = implode( ',', $ids );
+        
+        // Co-occurrence edges among top entities
+        $edges = $wpdb->get_results(
+        "SELECT
+            ep1.entity_id AS a,
+            ep2.entity_id AS b,
+            COUNT(DISTINCT ep1.post_id) AS w
+         FROM {$entity_post_table} ep1
+         INNER JOIN {$entity_post_table} ep2
+            ON ep1.post_id = ep2.post_id
+           AND ep1.entity_id < ep2.entity_id
+         WHERE ep1.entity_id IN ({$ids_in})
+           AND ep2.entity_id IN ({$ids_in})
+         GROUP BY a, b
+         HAVING w >= 2
+         ORDER BY w DESC
+         LIMIT 200",
+         ARRAY_A
+        );
+        
+        $nodes = array();
+        foreach ( $top as $t ) {
+            $nodes[] = array(
+                'id'    => (int) $t['id'],
+                'label' => (string) $t['name'],
+                'title' => esc_html( (string) $t['type'] ) . ' • ' . (int) $t['posts_count'] . ' posts',
+                'value' => (int) $t['posts_count'], // node size weight
+                'group' => (string) $t['type'],
+            );
+        }
+        
+        $out_edges = array();
+        foreach ( $edges as $e ) {
+            $out_edges[] = array(
+                'from'  => (int) $e['a'],
+                'to'    => (int) $e['b'],
+                'value' => (int) $e['w'],
+                'title' => (int) $e['w'] . ' co-occurrences',
+            );
+        }
+        
+        wp_send_json_success( array( 'nodes' => $nodes, 'edges' => $out_edges ) );
+    }
+    
+    
     /**
      * Enable/Disable schema output for a post (Pro).
      */
@@ -2470,6 +2970,8 @@ if ( ! $is_pro ) {
         wp_safe_redirect( admin_url( 'admin.php?page=wpranklab&wpranklab_batch=cancelled' ) );
         exit;
     }
+    
+    
     
     
 
