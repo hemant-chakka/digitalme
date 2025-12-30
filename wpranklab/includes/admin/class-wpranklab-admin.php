@@ -33,6 +33,9 @@ class WPRankLab_Admin {
         add_action( 'admin_init', array( $this, 'register_settings' ) );
 
         add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_assets' ) );
+        
+        add_action( 'enqueue_block_editor_assets', array( $this, 'enqueue_block_editor_assets' ) );
+        
 
         // Manual license check handler.
         add_action( 'admin_post_wpranklab_check_license', array( $this, 'handle_check_license' ) );
@@ -79,10 +82,63 @@ class WPRankLab_Admin {
         });
         
         add_action( 'admin_post_wpranklab_cancel_batch_scan', array( $this, 'handle_cancel_batch_scan' ) );
+        
+        add_action( 'wp_ajax_wpranklab_render_editor_panel', array( $this, 'ajax_render_editor_panel' ) );
+        
+        add_action( 'add_meta_boxes', function() {
+            if ( function_exists( 'get_current_screen' ) ) {
+                $screen = get_current_screen();
+                if ( $screen && method_exists( $screen, 'is_block_editor' ) && $screen->is_block_editor() ) {
+                    remove_meta_box( 'wpranklab_ai_visibility', null, 'side' ); // use your real metabox ID + context
+                }
+            }
+        }, 100 );
+            
             
             
 
     }
+    
+    
+    public function ajax_render_editor_panel() {
+        
+        // Optional nonce check
+        if ( isset( $_POST['_ajax_nonce'] ) && ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['_ajax_nonce'] ) ), 'wpranklab_editor_panel' ) ) {
+            wp_send_json_error( array( 'message' => 'Invalid nonce.' ) );
+        }
+        
+        if ( ! current_user_can( 'edit_posts' ) ) {
+            wp_send_json_error( array( 'message' => 'Permission denied.' ) );
+        }
+        
+        $post_id = isset( $_POST['post_id'] ) ? absint( $_POST['post_id'] ) : 0;
+        if ( ! $post_id ) {
+            wp_send_json_error( array( 'message' => 'Missing post_id.' ) );
+        }
+        
+        ob_start();
+        
+        // Reuse your existing metabox renderer here.
+        // Example (change to your actual function):
+        // $this->render_ai_visibility_metabox( get_post( $post_id ) );
+        //
+        // If your current renderer signature is ($post, $metabox), pass null for metabox:
+        // $this->render_ai_visibility_metabox( get_post( $post_id ), null );
+        
+        $post = get_post( $post_id );
+        if ( $post ) {
+            $this->render_ai_visibility_metabox( $post, null ); // <-- rename to your actual callback
+        }
+        
+        $html = ob_get_clean();
+        
+        wp_send_json_success( array( 'html' => $html ) );
+    }
+    
+    
+    
+    
+    
 
     /**
      * Dev helper to create a (backdated) history snapshot without calling OpenAI.
@@ -534,7 +590,26 @@ class WPRankLab_Admin {
             );
         
     }
-
+    
+    public function enqueue_block_editor_assets() {
+        wp_enqueue_script(
+            'wpranklab-editor-sidebar',
+            plugins_url( 'assets/js/wpranklab-editor-sidebar.js', WPRANKLAB_PLUGIN_FILE ),
+            array( 'wp-plugins', 'wp-edit-post', 'wp-element', 'wp-components', 'wp-data' ),
+            defined( 'WPRANKLAB_VERSION' ) ? WPRANKLAB_VERSION : '0.0.0',
+            true
+            );
+        
+        wp_localize_script(
+            'wpranklab-editor-sidebar',
+            'WPRankLabEditor',
+            array(
+                'nonce' => wp_create_nonce( 'wpranklab_editor_panel' ),
+            )
+            );
+    }
+    
+    
     /**
      * Dashboard page.
      */
