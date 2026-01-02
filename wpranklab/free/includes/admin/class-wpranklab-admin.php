@@ -389,10 +389,11 @@ $days    = max( 0, min( 60, $days ) );
             'wpranklab-settings',
             'wpranklab_settings_main'
             );
-// Set/clear expiry timestamp based on the toggle
-        
 
-    /**
+
+    }
+
+/**
      * Sanitize general settings.
      */
     public function sanitize_settings( $input ) {
@@ -426,9 +427,6 @@ $days    = max( 0, min( 60, $days ) );
             $cache_minutes = 10080;
         }
         $output['ai_cache_minutes'] = $cache_minutes;
-if ( $days < 1 ) { $days = 1; }
-        if ( $days > 14 ) { $days = 14; } // cap for safety
-                }
         
         
 
