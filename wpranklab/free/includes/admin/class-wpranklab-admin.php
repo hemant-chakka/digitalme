@@ -655,11 +655,58 @@ $days    = max( 0, min( 60, $days ) );
         /**
      * Dashboard page.
      */
+
+    /**
+     * Render shared admin header + nav (lightweight, no React build).
+     *
+     * @param string $active
+     * @param string $title
+     * @param string $subtitle
+     */
+    private function wpranklab_render_header( $active, $title, $subtitle = '' ) {
+        $base = admin_url( 'admin.php?page=wpranklab' );
+        $tabs = array(
+            'dashboard'   => array( 'label' => __( 'Dashboard', 'wpranklab' ), 'url' => $base ),
+            'entity'      => array( 'label' => __( 'Entity Graph', 'wpranklab' ), 'url' => admin_url( 'admin.php?page=wpranklab-entity-graph' ) ),
+            'competitors' => array( 'label' => __( 'Competitors', 'wpranklab' ), 'url' => admin_url( 'admin.php?page=wpranklab-competitors' ) ),
+            'checklist'   => array( 'label' => __( 'AI SEO Checklist', 'wpranklab' ), 'url' => admin_url( 'admin.php?page=wpranklab-ai-seo-checklist' ) ),
+            'settings'    => array( 'label' => __( 'Settings', 'wpranklab' ), 'url' => admin_url( 'admin.php?page=wpranklab-settings' ) ),
+        );
+
+        echo '<div class="wpranklab-header">';
+        echo '<div class="wpranklab-header__top">';
+        echo '<div class="wpranklab-brand">';
+        echo '<span class="wpranklab-brand__mark" aria-hidden="true">◎</span>';
+        echo '<div class="wpranklab-brand__text">';
+        echo '<div class="wpranklab-brand__name">' . esc_html__( 'WPRankLab', 'wpranklab' ) . '</div>';
+        echo '<div class="wpranklab-brand__title">' . esc_html( $title ) . '</div>';
+        if ( ! empty( $subtitle ) ) {
+            echo '<div class="wpranklab-brand__subtitle">' . esc_html( $subtitle ) . '</div>';
+        }
+        echo '</div></div>';
+
+        // Badge
+        $is_pro = function_exists( 'wpranklab_is_pro_active' ) && wpranklab_is_pro_active();
+        echo '<div class="wpranklab-badge" data-plan="' . ( $is_pro ? 'pro' : 'free' ) . '">' . ( $is_pro ? esc_html__( 'Pro', 'wpranklab' ) : esc_html__( 'Free', 'wpranklab' ) ) . '</div>';
+
+        echo '</div>';
+
+        echo '<div class="wpranklab-nav">';
+        foreach ( $tabs as $key => $tab ) {
+            $cls = ( $key === $active ) ? 'wpranklab-nav__item is-active' : 'wpranklab-nav__item';
+            echo '<a class="' . esc_attr( $cls ) . '" href="' . esc_url( $tab['url'] ) . '">' . esc_html( $tab['label'] ) . '</a>';
+        }
+        echo '</div>';
+        echo '</div>';
+    }
+
     public function render_dashboard_page() {
         $scan_done  = isset( $_GET['wpranklab_scan_all'] ) && 'done' === $_GET['wpranklab_scan_all'];
         $scan_count = isset( $_GET['wpranklab_scan_count'] ) ? (int) $_GET['wpranklab_scan_count'] : 0;
         ?>
         <div class="wrap wpranklab-wrap">
+            <?php $this->wpranklab_render_header('dashboard'); ?>
+
             <h1><?php esc_html_e( 'WPRankLab – AI Visibility Overview', 'wpranklab' ); ?></h1>
             
             <?php
@@ -839,6 +886,8 @@ if ( class_exists( 'WPRankLab_Batch_Scan' ) ) {
         $this->settings = get_option( WPRANKLAB_OPTION_SETTINGS, array() );
         ?>
         <div class="wrap wpranklab-wrap">
+            <?php $this->wpranklab_render_header('settings'); ?>
+
             <h1><?php esc_html_e( 'WPRankLab Settings', 'wpranklab' ); ?></h1>
 
             <form method="post" action="options.php">
