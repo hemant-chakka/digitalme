@@ -705,7 +705,7 @@ $days    = max( 0, min( 60, $days ) );
         $scan_count = isset( $_GET['wpranklab_scan_count'] ) ? (int) $_GET['wpranklab_scan_count'] : 0;
         ?>
         <div class="wrap wpranklab-wrap">
-            <?php $this->wpranklab_render_header('dashboard'); ?>
+            <?php $this->wpranklab_render_header('dashboard', __( 'Dashboard', 'wpranklab' )); ?>
 
             <h1><?php esc_html_e( 'WPRankLab – AI Visibility Overview', 'wpranklab' ); ?></h1>
             
@@ -886,7 +886,7 @@ if ( class_exists( 'WPRankLab_Batch_Scan' ) ) {
         $this->settings = get_option( WPRANKLAB_OPTION_SETTINGS, array() );
         ?>
         <div class="wrap wpranklab-wrap">
-            <?php $this->wpranklab_render_header('settings'); ?>
+            <?php $this->wpranklab_render_header('settings', __( 'Settings', 'wpranklab' )); ?>
 
             <h1><?php esc_html_e( 'WPRankLab Settings', 'wpranklab' ); ?></h1>
 
